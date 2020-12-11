@@ -304,8 +304,6 @@ func printUsage() {
 	}
 	fmt.Fprintf(flag.CommandLine.Output(),
 		`Usage:
-   `+prog+` sql [-v] DB FILE FILE-ID
-                   generate SQL for FILE
    `+prog+` info [-dx | -nx | -grams | -gx] DB [GROUP]
                    print info for database or GROUP
                    displays any groups which do not exist as files

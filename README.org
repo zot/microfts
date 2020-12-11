@@ -76,3 +76,69 @@ Usage:
     	print candidates on separate lines
   -v	verbose
 #+end_example
+* Notes
+** Grams
+Only alphanumeric characters are represented faithfully in grams, other characters are considered whitespace and display as '.'. This makes a base-37 triple (0-9 and A-Z), which just fits into 2 bytes. Which is a big deal, spacewise.  Grams for starts of words begin with two whitespaces and ends of words end with one whitespace. There are no grams that end with two whitespaces.
+** Groups and chunks
+The index consists of grams for chunks that belong to groups. Groups have names and the default is to use file names as group names.
+
+*** Supported groups and chunks
+Microfts supports using file names as groups and splitting files into chunks either by line or by org-mode element, with the chunk data being a triple of line, offset, chunk-length. Searching finds candidate chunks by intersecting gram entries and then consults the files named by the groups for the actual content.
+*** Custom groups and chunks
+If this is not sufficient, the command also supports custom usage: you can add chunks to a group, specifying data and grams. Searching can return candidate chunks for a set of grams.
+** Compressed representation for unsigned integers (lexicographically orderable)
+| 7 bits  | 0                   - 127                  | 0xxxxxxx                 |
+| 12 bits | 128                 - 4095                 | 1000xxxx X               |
+| 20 bits | 4096                - 1048575              | 1001xxxx X X             |
+| 28 bits | 1048576             - 268435455            | 1010xxxx X X X           |
+| 36 bits | 268435456           - 68719476735          | 1011xxxx X X X X         |
+| 44 bits | 68719476736         - 17592186044415       | 1100xxxx X X X X X       |
+| 52 bits | 17592186044416      - 4503599627370495     | 1101xxxx X X X X X X     |
+| 60 bits | 4503599627370496    - 1152921504606846975  | 1110xxxx X X X X X X X   |
+| 64 bits | 1152921504606846976 - 18446744073709551615 | 1111---- X X X X X X X X |
+** LMDB Trees
+*** Grams: GRAM-> BLOCK
+GRAM is a 2-byte value
+|----------|
+| OID LIST |
+|----------|
+*** OID LISTS
+9 lists of oids: [9][]byte.
+
+Note -- this is probably too ornate and a simple byte array and a
+count might have the same performance and space.
+|---------------|
+| # 1-byte OIDS |
+| # 2-byte OIDS |
+| # 3-byte OIDS |
+| # 4-byte OIDS |
+| # 5-byte OIDS |
+| # 6-byte OIDS |
+| # 7-byte OIDS |
+| # 8-byte OIDS |
+| # 9-byte OIDS |
+| OIDS          |
+|---------------|
+*** Gram 0 holds the info since 0 is not a legal gram
+|-----------------|
+| next unused oid |
+| next unused gid |
+| free oids       |
+| free gids       |
+|-----------------|
+*** Chunks: OID -> BLOCK
+OIDS are compressed integers
+|-------------------------|
+| GID                     |
+| data (e.g. line number) |
+| gram count              |
+|-------------------------|
+*** Groups: GID -> BLOCK
+GIDS are compressed integers
+|-----------------------------------|
+| NAME                              |
+| oid count                         |
+| last changed timestamp            |
+| validity (valid = 0, deleted = 1) |
+|-----------------------------------|
+*** Group Names: NAME->GID

@@ -573,9 +573,9 @@ func oidListFor(bytes []byte) *oidList {
 }
 
 func (oids *oidList) total() int {
-	total := 0
+	total := 9
 	for i := 0; i < 9; i++ {
-		total += numSize(uint64(len(oids[i]))) + len(oids[i])
+		total += len(oids[i])
 	}
 	return total
 }

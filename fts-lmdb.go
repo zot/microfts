@@ -1,22 +1,24 @@
 package main
 
 import (
+	"bufio"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
-	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
-	"unsafe"
+	"time"
 
 	"github.com/AskAlexSharov/lmdb-go/lmdb"
-	//"github.com/bmatsuo/lmdb-go/lmdb"
 )
 
 /*
 
-* TAGS
+* GRAMS
 KEY IS THE GRAM
 VALUE IS AN ARRAY OF 4-byte OIDs
 
@@ -45,293 +47,636 @@ VALUE IS THE 4-byte OID
 const (
 	// map_size 5GB max
 	mapSize        = 1024 * 1024 * 1024 * 10
-	dbs            = 10        // objects, names, tags
-	tagSize        = 2         // bytes
+	dbs            = 10        // objects, names, grams
+	gramSize       = 2         // bytes
 	maxFileIDBytes = 65536 * 2 // number of bytes in a list of all file ids
+	maxInt         = int(^uint(0) >> 1)
+	null64         = 0xFFFFFFFFFFFFFFFF
 )
+
+const (
+	valid = iota
+	deleted
+)
+
+var groupValidity = []string{"valid", "changed", "deleted"}
+
+var systemID = []byte{0}
 
 type oidList [9][]byte
 
-type doc struct {
-	original  []byte
-	groupName string
+type chunk struct {
+	gid       uint64
 	data      []byte
-	tags      []uint16
+	gramCount uint16
+}
+
+type groupStruct struct {
+	groupName   string
+	oidCount    uint64
+	lastChanged time.Time
+	validity    byte
+}
+
+type myBuf struct {
+	bytes []byte
 }
 
 type lmdbConfigStruct struct {
-	cmd       string   // arg 1
-	args      []string // args 2 - N-1
-	db        string   // arg N
-	env       *lmdb.Env
-	tagBuf    []byte
-	txn       *lmdb.Txn
-	objectDb  lmdb.DBI
-	groupDb   lmdb.DBI
-	tagsDb    lmdb.DBI
-	oidKeyBuf []byte
+	cmd           string   // arg 1
+	args          []string // args 2 - N-1
+	db            string   // arg N
+	env           *lmdb.Env
+	gramKeyBuf    []byte
+	gramBuf       []byte
+	txn           *lmdb.Txn
+	chunkDb       lmdb.DBI
+	groupDb       lmdb.DBI
+	groupNameDb   lmdb.DBI
+	gramDb        lmdb.DBI
+	scratchBuf    *myBuf
+	dirty         bool
+	dirtyGroup    *groupStruct
+	dirtyGroupGid uint64
+	dirtyName     bool
+	dirtyGrams    map[gram]*oidList
+	oidBuf        []byte
+	input         *bufio.Reader
+	data          []byte
 	// persisted values
 	nextOID  uint64
+	nextGID  uint64
 	freeOids []byte // compressed oids
+	freeGids []byte // compressed oids
 	//options
-	gramSize  int
-	delimiter string
-	nameHex   bool
-	tagHex    bool
-	dataHex   bool
-	data      string
-	tags      bool
-	group     string
+	partial     bool
+	org         bool
+	gramSize    int
+	delimiter   string
+	gramHex     bool
+	dataHex     bool
+	dataString  string
+	grams       bool
+	file        bool
+	candidates  bool
+	separate    bool
+	numbers     bool
+	compression string
 }
 
 var lmdbConfig lmdbConfigStruct
 
 func runLmdb() bool {
-	testNums()
-	fmt.Fprintf(os.Stderr, "ARGS:'%s'\n", strings.Join(flag.Args(), "' '"))
-	if len(flag.Args()) == 0 || cmds[flag.Args()[0]] == nil {return false}
-	if len(flag.Args()) == 1 {
+	if len(os.Args) == 1 {
 		usage()
 	}
+	if cmds[os.Args[1]] == nil {return false}
 	cfg := &lmdbConfig
-	cfg.oidKeyBuf = new([9]byte)[:]
-	cfg.tagBuf = make([]byte, 0, 1024)
-	cfg.db = flag.Args()[len(flag.Args())-1]
-	cfg.cmd = flag.Args()[0]
-	cfg.args = flag.Args()[1 : len(flag.Args())-1]
-	fmt.Fprintln(os.Stderr, "DB:", cfg.db)
-	_, err := os.Stat(cfg.db)
-	exists := err == nil
-	if cfg.cmd != "create" && !exists {
-		panic(fmt.Sprintf("%s: DATABASE %s DOES NOT EXIST", cfg.cmd, cfg.db))
+	cfg.scratchBuf = new(myBuf)
+	cfg.gramBuf = (&[3]byte{})[:]
+	cfg.gramKeyBuf = (&[2]byte{})[:]
+	cfg.db = flag.Args()[0]
+	cfg.cmd = os.Args[1]
+	cfg.args = flag.Args()[1:]
+	cfg.oidBuf = make([]byte, 1024)
+	cfg.clean()
+	if cfg.cmd != "create" && cfg.cmd != "grams" {
+		_, err := os.Stat(cfg.db)
+		if err != nil {
+			exitError(fmt.Sprintf("%s: DATABASE %s DOES NOT EXIST", cfg.cmd, cfg.db))
+		}
 	}
 	cmds[cfg.cmd](cfg)
 	return true
 }
 
-func program() string {
-	p, err := filepath.Abs(os.Args[0])
-	if err != nil {return fmt.Sprintf("<BAD PROGRAM PATH: %s>", os.Args[0])}
-	return p
+func (cfg *lmdbConfigStruct) numBytes(n uint64) []byte {
+	cfg.scratchBuf.reset()
+	cfg.scratchBuf.putNum(n)
+	return cfg.scratchBuf.bytes
 }
 
-func lmdbOpen(write bool) {
+func (cfg *lmdbConfigStruct) open(write bool) {
 	flags := uint(lmdb.NoSubdir)
 	env, err := lmdb.NewEnv()
 	check(err)
-	err = env.SetMapSize(mapSize)
-	check(err)
-	err = env.SetMaxDBs(dbs)
-	check(err)
-	lmdbConfig.env = env
+	check(env.SetMapSize(mapSize))
+	check(env.SetMaxDBs(dbs))
+	cfg.env = env
 	if !write {
 		flags |= lmdb.Readonly
 	}
-	fmt.Fprintln(os.Stderr, "Opening", lmdbConfig.db)
-	err = env.Open(lmdbConfig.db, flags, 0644)
+	err = env.Open(cfg.db, flags, 0644)
 	check(err)
-	fmt.Println(env)
+	if cfg.cmd == "create" {
+		cfg.dirty = true
+	} else {
+		cfg.view(func() {
+			cfg.load()
+		})
+	}
 }
 
-func cmdStat(cfg *lmdbConfigStruct) {
-	lmdbOpen(false)
+func cmdInfo(cfg *lmdbConfigStruct) {
+	cfg.open(false)
 	defer cfg.env.Close()
-	fmt.Println("STAT")
-	cfg.env.View(func(txn *lmdb.Txn) error {
-		objects, err := txn.OpenDBI("objects", 0)
-		check(err)
-		stat, err := txn.Stat(objects)
-		check(err)
-		fmt.Printf("Objects: %d\n", stat.Entries)
-		return nil
+	cfg.view(func() {
+		if len(cfg.args) == 0 {
+			stat, err := cfg.txn.Stat(cfg.groupDb)
+			check(err)
+			fmt.Printf("Groups: %d\n", stat.Entries)
+			stat, err = cfg.txn.Stat(cfg.groupNameDb)
+			check(err)
+			fmt.Printf("Group names: %d\n", stat.Entries)
+			stat, err = cfg.txn.Stat(cfg.chunkDb)
+			check(err)
+			chunkTot := float64(stat.Entries)
+			fmt.Printf("Chunks: %d\n", stat.Entries)
+			stat, err = cfg.txn.Stat(cfg.gramDb)
+			check(err)
+			gramTot := stat.Entries
+			gramTot--
+			fmt.Printf("Grams: %d\n", gramTot)
+			staleGroups := map[string]string{}
+			staleGroupNames := []string{}
+			cfg.iterate(cfg.groupDb, func(cur *lmdb.Cursor, k, v []byte) {
+				group := decodeGroup(v)
+				stat, err := os.Stat(group.groupName)
+				if os.IsNotExist(err) {
+					staleGroups[group.groupName] = "File %s does not exist"
+				} else if err != nil {
+					staleGroups[group.groupName] = "Cannot open file %s"
+				} else if stat.ModTime().After(group.lastChanged) {
+					staleGroups[group.groupName] = "File %s has changes"
+				}
+			})
+			if len(staleGroups) > 0 {
+				for group := range staleGroups {
+					staleGroupNames = append(staleGroupNames, group)
+				}
+				sort.Strings(staleGroupNames)
+				for _, group := range staleGroupNames {
+					fmt.Printf(staleGroups[group]+"\n", group)
+				}
+			}
+			if cfg.grams {
+				maxOids := 0
+				minOids := int(maxInt)
+				amounts := []float64{
+					0.99,
+					0.95,
+					0.90,
+					0.80,
+					0.75,
+					0.70,
+					0.30,
+					0.20,
+					0.10,
+					0.05,
+					0.01,
+					0.001,
+					0.0001,
+					0.00001,
+					0.000001,
+				}
+				coverage := map[float64]int{}
+				for _, amt := range amounts {
+					coverage[amt] = 0
+				}
+				totalBytes, chunkBytes, gramBytes := 0, 0, 0
+				cur, err := cfg.txn.OpenCursor(cfg.chunkDb)
+				check(err)
+				k, v, err := cur.Get(nil, nil, lmdb.First)
+				count := 0
+				for err == nil {
+					count++
+					totalBytes += len(k) + len(v)
+					chunkBytes += len(k) + len(v)
+					k, v, err = cur.Get(nil, nil, lmdb.Next)
+				}
+				if err != nil && !lmdb.IsNotFound(err) {
+					check(err)
+				}
+				cur.Close()
+				cur, err = cfg.txn.OpenCursor(cfg.gramDb)
+				check(err)
+				_, _, err = cur.Get(nil, nil, lmdb.First)
+				check(err)
+				for {
+					k, v, err := cur.Get(nil, nil, lmdb.Next) // skip first gram: system record
+					if err != nil {break}
+					oids := oidListFor(v)
+					totalBytes += len(k) + len(v)
+					gramBytes += len(k) + len(v)
+					oidTot := oids.totalOids()
+					if oidTot < minOids {
+						minOids = oidTot
+					}
+					if oidTot > maxOids {
+						maxOids = oidTot
+					}
+					for amt := range coverage {
+						if float64(oidTot)/float64(chunkTot) <= amt {
+							coverage[amt]++
+						}
+					}
+				}
+				if err != nil && !lmdb.IsNotFound(err) {
+					check(err)
+				}
+				cur.Close()
+				fmt.Printf("total bytes: %d\n", totalBytes)
+				fmt.Printf("chunk bytes: %d\n", chunkBytes)
+				fmt.Printf("gram bytes: %d\n", gramBytes)
+				fmt.Printf("max oids: %d\n", maxOids)
+				fmt.Printf("min oids: %d\n", minOids)
+				for _, amt := range amounts {
+					fmt.Printf("%d grams are in %f%% of chunks\n", coverage[amt], 100*amt)
+				}
+			}
+		} else if len(cfg.args) == 1 {
+			_, group := cfg.getGroup(cfg.groupName())
+			if group == nil {
+				exitError(fmt.Sprintf("NO GROUP %s\n", cfg.groupName()))
+			}
+
+		}
 	})
 }
 
 func cmdCreate(cfg *lmdbConfigStruct) {
-	lmdbOpen(true)
+	cfg.open(true)
 	defer cfg.env.Close()
-	fmt.Fprintf(os.Stderr, "CREATE, env: %v\n", cfg.env)
 	cfg.env.Update(func(txn *lmdb.Txn) error {
-		for _, name := range strings.Split("objects,names,tags", ",") {
-			fmt.Fprintf(os.Stderr, "Creating db %s\n", name)
-			db, err := txn.OpenDBI(name, lmdb.Create)
-			check(err)
-			stat, err := txn.Stat(db)
-			check(err)
-			fmt.Printf("%s: %d\n", name, stat.Entries)
-		}
+		cfg.runTxn(txn, lmdb.Create, func() {
+			cfg.store()
+		})
 		return nil
 	})
 }
 
-func cmdTags(cfg *lmdbConfigStruct) {
+func (cfg *lmdbConfigStruct) groupName() string {
+	return cfg.args[0]
+}
+
+func cmdChunk(cfg *lmdbConfigStruct) {
 	if len(cfg.args) != 2 {
 		usage()
 	}
-	cfg.group = cfg.args[0]
-	lmdbOpen(false)
+	cfg.open(true)
 	defer cfg.env.Close()
-	fmt.Fprint(os.Stderr, "DEFINE TAGS FOR OBJECT '%s'\n", cfg.args[0])
+	if cfg.dataHex {
+		bytes, err := hex.DecodeString(cfg.dataString)
+		check(err)
+		cfg.data = bytes
+	} else {
+		cfg.data = []byte(cfg.dataString)
+	}
 	cfg.update(func() {
-		fmt.Println(cfg.objectDb, cfg.tags, cfg.groupDb)
-		tags := strings.Split(cfg.args[1], cfg.delimiter)
-		oid, objectBuf, objectTags := cfg.initDoc(len(tags))
-		for _, tag := range tags {
-			cfg.addTagEntry(cfg.tagKey(tag), oid, objectTags)
+		oid, d := cfg.initChunk()
+		if cfg.gramHex {
+			grams := make([]byte, len(cfg.args[1])/2)
+			_, err := hex.Decode(grams, []byte(cfg.args[1]))
+			check(err)
+			for i := 0; i < len(grams); i += 2 {
+				cfg.addGramEntry(gram((int(grams[i])<<8)|int(grams[i+1])), oid, d)
+			}
+		} else {
+			grams := strings.Split(cfg.args[1], cfg.delimiter)
+			for _, grm := range grams {
+				cfg.addGramEntry(gramForUnicode(grm), oid, d)
+			}
 		}
-		cfg.putObject(oid, objectBuf)
+		cfg.putChunk(oid, d)
 	})
 }
 
-func (cfg *lmdbConfigStruct) initDoc(numTags int) ([]byte, []byte, []byte) {
-	data := []byte(nil) // get data from command line args
-	oidBuf := cfg.getGroup([]byte(cfg.group))
-	var oid []byte
-	if oidBuf != nil {
-		oid = oidBuf
-		cfg.deleteObjectContents(oid)
-	} else {
-		oid = cfg.getNewOid()
+func cmdInput(cfg *lmdbConfigStruct) {
+	var date time.Time
+	if len(cfg.args) != 1 { // only GROUP and DATABASE
+		usage()
 	}
-	objectBuf := make([]byte, 0, 18+len(cfg.group)+len(data)+numTags*2)
-	rest, _ := putNum(uint64(len(cfg.group)), objectBuf)
-	copy(rest, cfg.group)
-	rest = rest[len(cfg.group):]
-	rest, _ = putNum(uint64(len(data)), rest)
-	copy(rest, data)
-	rest = rest[len(data):]
-	total := len(objectBuf) - len(rest)
-	result := objectBuf[:total+numTags*2]
-	return oid, result, result[total:]
+	if cfg.file {
+		stat, err := os.Stat(cfg.groupName())
+		check(err)
+		date = stat.ModTime()
+		input, err := os.OpenFile(cfg.groupName(), os.O_RDONLY, 0)
+		check(err)
+		cfg.input = bufio.NewReader(input)
+	} else {
+		cfg.input = bufio.NewReader(os.Stdin)
+	}
+	if cfg.org {
+		cfg.indexOrg(date)
+	} else {
+		cfg.indexLines(date)
+	}
 }
 
-//add the OID to the entryBuf, store it the database, and add the tag to the doc buf
-func (cfg *lmdbConfigStruct) addTagEntry(key []byte, oid []byte, docBuf []byte) []byte {
-	oids := cfg.getTag(key)
-	if oids == nil { // found an existing tag
+func (cfg *lmdbConfigStruct) indexOrg(date time.Time) {
+	contents, err := ioutil.ReadAll(cfg.input)
+	check(err)
+	str := string(contents)
+	cfg.open(true)
+	defer cfg.env.Close()
+	cfg.update(func() {
+		_, grp := cfg.getGroup(cfg.groupName())
+		if grp != nil && grp.lastChanged.Equal(date) {return}
+		cfg.deleteGroup()
+		forParts(str, func(line, typ, start, end int) {
+			g := grams(str[start:end])
+			if len(g) > 0 {
+				buf := new(myBuf)
+				buf.putNum(uint64(line))
+				buf.putNum(uint64(start))
+				buf.putNum(uint64(end - start))
+				cfg.data = buf.bytes
+				oid, d := cfg.initChunk() // make chunk for chunk
+				for grm := range g {
+					cfg.addGramEntry(grm, oid, d)
+				}
+				cfg.putChunk(oid, d)
+			}
+		})
+		cfg.dirtyGroup.lastChanged = date
+	})
+}
+
+func (cfg *lmdbConfigStruct) indexLines(date time.Time) {
+	if cfg.file {
+		_, grp := cfg.getGroup(cfg.groupName())
+		if grp.lastChanged.Equal(date) {return}
+		input, err := os.OpenFile(cfg.groupName(), os.O_RDONLY, 0)
+		check(err)
+		cfg.input = bufio.NewReader(input)
+	} else {
+		cfg.input = bufio.NewReader(os.Stdin)
+	}
+	cfg.open(true)
+	defer cfg.env.Close()
+	cfg.update(func() {
+		cfg.deleteGroup()
+		pos := 0
+		for lineNo := 1; ; lineNo++ {
+			line, err := readLine(cfg.input)
+			if err == io.EOF {break}
+			buf := new(myBuf)
+			buf.putNum(uint64(lineNo))
+			buf.putNum(uint64(pos))
+			buf.putNum(uint64(len(line)))
+			cfg.data = buf.bytes
+			oid, d := cfg.initChunk() // make chunk for line
+			for grm := range grams(line) {
+				cfg.addGramEntry(grm, oid, d)
+			}
+			cfg.putChunk(oid, d)
+			pos += len(line)
+		}
+		cfg.dirtyGroup.lastChanged = date
+	})
+}
+
+func readLine(reader *bufio.Reader) (string, error) {
+	line, err := reader.ReadBytes('\n')
+	if err == io.EOF {return "", err}
+	check(err)
+	return string(line), nil
+}
+
+func (cfg *lmdbConfigStruct) initChunk() ([]byte, *chunk) {
+	d := new(chunk)
+	d.data = cfg.data
+	gid, group := cfg.getGroup(cfg.groupName())
+	if group == nil {
+		gid, group = cfg.createGroup()
+	}
+	d.gid = gid
+	oid := cfg.getNewOid()
+	cfg.dirtyGroupGid = gid
+	cfg.dirtyGroup = group
+	group.oidCount++
+	return oid, d
+}
+
+//add the OID to the chunkBuf, mark it dirty, and add the gram to the chunk buf, returning the chunk buf
+func (cfg *lmdbConfigStruct) addGramEntry(grm gram, oid []byte, d *chunk) {
+	oids := cfg.getGram(grm)
+	if oids == nil { // found an existing gram
 		oids = new(oidList)
 	}
 	l := len(oid)
-	if cap(oids[l]) >= len(oids[l])+l {
-		oids[l] = oids[l][0 : len(oids[l])+l : cap(oids[l])]
-	} else {
-		oldOids := oids[l]
-		oids[l] = make([]byte, len(oids[l])+l)
-		copy(oids[l], oldOids)
-	}
-	copy(oids[l][len(oids[l])-l:], oid)
-	cfg.putTag(key, oids)
-	docBuf[0] = key[0]
-	docBuf[1] = key[1]
-	return docBuf[2:]
+	oids[l-1] = cat(oids[l-1], oid)
+	cfg.dirtyGrams[grm] = oids
+	d.gramCount++
 }
 
-func readOidList(oids *oidList, bytes []byte) {
-	start := 0
-	for i := 0; i < 9; i++ {
-		rawOids, bytes := getNumOrPanic(bytes)
-		numOids := int(rawOids)
-		oids[i] = bytes[start : start+numOids*(i+1) : start+numOids*(i+1)]
-		start += numOids * (i + 1)
+func cat(bytes1 []byte, bytes2 []byte) []byte {
+	buf := newBuf(bytes1)
+	buf.append(bytes2)
+	return buf.bytes
+}
+
+func newBuf(bytes []byte) *myBuf {
+	return &myBuf{bytes}
+}
+
+func (buf *myBuf) reset() {
+	buf.bytes = buf.bytes[:0]
+}
+
+func (buf *myBuf) append(bytes []byte) {
+	copy(buf.next(len(bytes)), bytes)
+}
+
+func (buf *myBuf) skip(n int) {
+	buf.grow(n)
+	buf.bytes = buf.bytes[:len(buf.bytes)+n]
+}
+
+func (buf *myBuf) next(n int) []byte {
+	l := len(buf.bytes)
+	buf.skip(n)
+	return buf.bytes[l : l+n]
+}
+
+func (buf *myBuf) rest(min int) []byte {
+	buf.grow(min)
+	return buf.bytes[len(buf.bytes):cap(buf.bytes)]
+}
+
+func (buf *myBuf) grow(n int) {
+	if cap(buf.bytes)-len(buf.bytes) < n {
+		l := cap(buf.bytes)
+		if l == 0 {
+			l = 1
+		}
+		target := len(buf.bytes) + n
+		for l < target {
+			l <<= 1
+		}
+		old := buf.bytes
+		buf.bytes = make([]byte, len(buf.bytes), l)
+		copy(buf.bytes, old)
 	}
+}
+
+func (buf *myBuf) len() int {
+	return len(buf.bytes)
+}
+
+func (buf *myBuf) putCountedBytes(bytes []byte) {
+	buf.putNum(uint64(len(bytes)))
+	buf.append(bytes)
+}
+
+func (buf *myBuf) putNum(n uint64) {
+	r1 := buf.rest(9)
+	r2, _ := putNum(n, r1)
+	buf.skip(len(r1) - len(r2))
+}
+
+func (buf *myBuf) appendOids(oids *oidList) {
+	for i := 0; i < 9; i++ {
+		buf.putNum(uint64(len(oids[i]) / (i + 1)))
+	}
+	for i := 0; i < 9; i++ {
+		buf.append(oids[i])
+	}
+}
+
+func (cfg *lmdbConfigStruct) getOidList(db lmdb.DBI, key []byte) *oidList {
+	return oidListFor(cfg.get(db, key))
+}
+
+func oidListFor(bytes []byte) *oidList {
+	if len(bytes) == 0 {return nil}
+	oids := new(oidList)
+	var rawOids uint64
+	start := 0
+	lengths := [9]int{}
+	for i := 0; i < 9; i++ {
+		rawOids, bytes = getNumOrPanic(bytes)
+		l := int(rawOids)
+		lengths[i] = l
+	}
+	for i := 0; i < 9; i++ {
+		l := lengths[i]
+		next := start + l*(i+1)
+		if next-start > 0 {
+			oids[i] = bytes[start:next:next]
+		} else {
+			oids[i] = bytes[0:0:0]
+		}
+		start = next
+	}
+	return oids
 }
 
 func (oids *oidList) total() int {
 	total := 0
 	for i := 0; i < 9; i++ {
-		total += len(oids[i]) * (i + 1)
+		total += numSize(uint64(len(oids[i]))) + len(oids[i])
 	}
 	return total
 }
 
-func (oids *oidList) appendTo(bytes []byte) []byte {
-	total := oids.total()
-	l := len(bytes)
-	if cap(bytes) >= l+total {
-		bytes = bytes[0 : l+total : cap(bytes)]
-	} else {
-		oldBytes := bytes
-		bytes = make([]byte, l+total)
-		copy(bytes, oldBytes)
-	}
+func (oids *oidList) totalOids() int {
+	total := 0
 	for i := 0; i < 9; i++ {
-		copy(bytes[l:], oids[i])
-		l = len(oids[i]) * (i + 1)
+		total += len(oids[i]) / (i + 1)
 	}
-	return bytes
+	return total
 }
 
-func (cfg *lmdbConfigStruct) tagKey(tag string) []byte {
-	tagBuf := cfg.tagBuf
-	if lmdbConfig.tagHex {
-		digit, err := strconv.ParseInt(tag[0:2], 16, 8)
-		check(err)
-		tagBuf[0] = byte(digit)
-		digit, err = strconv.ParseInt(tag[2:4], 16, 8)
-		check(err)
-		tagBuf[1] = byte(digit)
-	} else {
-		if len(tag) != 3 {
-			panic(fmt.Sprintf("Unicode tag is not a trigram: '%s'", tag))
+func (oids *oidList) allOids() map[uint64]struct{} {
+	result := make(map[uint64]struct{})
+	for _, bytes := range oids {
+		for len(bytes) > 0 {
+			var n uint64
+			n, bytes = getNumOrPanic(bytes)
+			result[n] = member
 		}
-		gram := uint16(0)
-		for i := 0; i < 3; i++ {
-			c := uint16(0)
-			if '0' <= tag[i] && tag[i] <= '9' {
-				c = uint16(tag[i] - '0')
-			} else if 'A' <= tag[i] && tag[i] <= 'Z' {
-				c = uint16(tag[i] - 'A')
-			} else if 'a' <= tag[i] && tag[i] <= 'z' {
-				c = uint16(tag[i] - 'a')
-			}
-			if gram%GRAM_BASE == 0 && c == 0 {continue}
-			if gram%GRAM_BASE == 0 { // starting a word
-				gram = c
-			} else {
-				gram = ((gram * GRAM_BASE) + c) % GRAM_3_BASE
-			}
-		}
-		tagBuf[0] = byte(gram >> 8)
-		tagBuf[1] = byte(gram & 0xFF)
 	}
-	return tagBuf
+	return result
+}
+
+func (oids *oidList) append(bytes []byte) {
+	sz := len(bytes)
+	oids[sz-1] = cat(oids[sz-1], bytes)
+}
+
+func (cfg *lmdbConfigStruct) gramKeyForGram(gram gram) []byte {
+	cfg.gramKeyBuf[0] = byte(gram >> 8)
+	cfg.gramKeyBuf[1] = byte(gram & 0xFF)
+	return cfg.gramKeyBuf
+}
+
+func (cfg *lmdbConfigStruct) gramFor(str string) gram {
+	if !cfg.gramHex {return gramForUnicode(str)}
+	digit1, err := strconv.ParseInt(str[:2], 16, 8)
+	check(err)
+	digit2, err := strconv.ParseInt(str[2:4], 16, 8)
+	check(err)
+	return gram((digit1 << 8) | digit2)
 }
 
 func (cfg *lmdbConfigStruct) oidKey(oid uint64) []byte {
-	return putNumOrPanic(oid, cfg.oidKeyBuf)
+	return cfg.numBytes(oid)
 }
 
-func (cfg *lmdbConfigStruct) deleteObjectContents(oidKey []byte) {
-	doc := cfg.getObject(oidKey)
-	for _, tag := range doc.tags {
-		cfg.deleteTagOid(tag, oidKey)
-	}
-}
-
-func (cfg *lmdbConfigStruct) deleteTagOid(tag uint16, oidKey []byte) {
-
-}
-
-func (cfg *lmdbConfigStruct) read() {
-	buf := cfg.get(cfg.objectDb, cfg.oidKey(0))
+func (cfg *lmdbConfigStruct) load() {
+	buf := cfg.get(cfg.gramDb, systemID)
 	if buf != nil {
 		oid, rest := getNumOrPanic(buf)
 		cfg.nextOID = oid
-		free, _ := getCountedBytes(rest)
+		oid, rest = getNumOrPanic(rest)
+		cfg.nextGID = oid
+		free, rest := getCountedBytes(rest)
 		cfg.freeOids = free
+		free, rest = getCountedBytes(rest)
+		cfg.freeGids = free
 	}
 }
 
 func (cfg *lmdbConfigStruct) store() {
-	buf := make([]byte, 9+len(cfg.freeOids))
-	rest := putNumOrPanic(cfg.nextOID, buf)
-	copy(rest, cfg.freeOids)
-	cfg.put(cfg.objectDb, cfg.oidKey(0), buf)
+	buf := new(myBuf)
+	buf.putNum(cfg.nextOID)
+	buf.putNum(cfg.nextGID)
+	buf.putCountedBytes(cfg.freeOids)
+	buf.putCountedBytes(cfg.freeGids)
+	cfg.put(cfg.gramDb, systemID, buf.bytes)
+}
+
+func (cfg *lmdbConfigStruct) storeDirty() {
+	if cfg.dirty {
+		cfg.store()
+	}
+	if cfg.dirtyGroup != nil {
+		cfg.putGroup(cfg.dirtyGroupGid, cfg.dirtyGroup)
+		if cfg.dirtyName {
+			buf := new(myBuf)
+			buf.putNum(cfg.dirtyGroupGid)
+			cfg.put(cfg.groupNameDb, []byte(cfg.dirtyGroup.groupName), buf.bytes)
+		}
+	}
+	if len(cfg.dirtyGrams) > 0 {
+		for grm, oids := range cfg.dirtyGrams {
+			cfg.putGram(cfg.gramKeyForGram(grm), oids)
+		}
+	}
+	cfg.clean()
+}
+
+func (cfg *lmdbConfigStruct) clean() {
+	cfg.dirty = false
+	cfg.dirtyGroup = nil
+	cfg.dirtyName = false
+	cfg.dirtyGrams = make(map[gram]*oidList)
 }
 
 func (cfg *lmdbConfigStruct) getNewOid() []byte {
 	var oid uint64
-	if cfg.freeOids != nil {
+	if len(cfg.freeOids) != 0 {
 		var rest []byte
 		oid, rest = getNumOrPanic(cfg.freeOids)
 		cfg.freeOids = rest
@@ -339,70 +684,379 @@ func (cfg *lmdbConfigStruct) getNewOid() []byte {
 		oid = cfg.nextOID
 		cfg.nextOID++
 	}
-	cfg.store()
+	cfg.dirty = true
 	return cfg.oidKey(oid)
 }
 
-func cmdText(cfg *lmdbConfigStruct) {
-	fmt.Println("TEXT")
+func cmdGrams(cfg *lmdbConfigStruct) {
+	if len(cfg.args) != 0 {
+		usage()
+	}
+	first := true
+	for grm := range grams(cfg.db) { // db is actually the phrase
+		if first {
+			first = false
+		} else {
+			fmt.Print(" ")
+		}
+		if cfg.gramHex {
+			fmt.Printf("%s: %s%s",
+				cfg.db,
+				strconv.FormatUint(uint64(grm>>8), 16),
+				strconv.FormatUint(uint64(grm&0xFF), 16))
+		} else {
+			fmt.Printf("%s", gramString(grm))
+		}
+	}
+	fmt.Println()
 }
 
 func cmdDelete(cfg *lmdbConfigStruct) {
-	fmt.Println("DELETE")
+	if len(cfg.args) != 1 {
+		usage()
+	}
+	cfg.open(true)
+	defer cfg.env.Close()
+	cfg.update(func() {
+		cfg.deleteGroup()
+	})
+}
+
+func (cfg *lmdbConfigStruct) iterate(dbi lmdb.DBI, code func(cur *lmdb.Cursor, key, value []byte)) {
+	cur, err := cfg.txn.OpenCursor(dbi)
+	check(err)
+	k, v, err := cur.Get(nil, nil, lmdb.First)
+	for err == nil {
+		code(cur, k, v)
+		k, v, err = cur.Get(nil, nil, lmdb.Next)
+	}
+	if err != nil && !lmdb.IsNotFound(err) {
+		check(err)
+	}
+	cur.Close()
+}
+
+func cmdCompact(cfg *lmdbConfigStruct) {
+	if len(cfg.args) != 0 {
+		usage()
+	}
+	cfg.open(true)
+	defer cfg.env.Close()
+	cfg.update(func() {
+		deletedGroups := map[uint64]struct{}{}
+		deletedChunks := map[uint64]struct{}{}
+		cfg.iterate(cfg.groupDb, func(cur *lmdb.Cursor, k, v []byte) {
+			gid, _ := getNumOrPanic(k)
+			group := decodeGroup(v)
+			if group.validity == deleted {
+				deletedGroups[gid] = member
+				cur.Del(0)
+				buf := &myBuf{cfg.freeGids}
+				buf.putNum(gid)
+				cfg.freeGids = buf.bytes
+				cfg.dirty = true
+			}
+		})
+		cfg.iterate(cfg.chunkDb, func(cur *lmdb.Cursor, k, v []byte) {
+			did, _ := getNumOrPanic(k)
+			chunk := decodeChunk(v)
+			if _, exists := deletedGroups[chunk.gid]; exists {
+				deletedChunks[did] = member
+				cur.Del(0)
+				buf := &myBuf{cfg.freeOids}
+				buf.putNum(did)
+				cfg.freeOids = buf.bytes
+				cfg.dirty = true
+			}
+		})
+		first := true
+		cfg.iterate(cfg.gramDb, func(cur *lmdb.Cursor, k, v []byte) {
+			if first { // skip system record
+				first = false
+				return
+			}
+			oids := oidListFor(v)
+			dirty := false
+			for i, bytes := range oids {
+				newBytes := new(myBuf)
+				for len(bytes) > 0 {
+					did, rest := getNumOrPanic(bytes)
+					if _, exists := deletedChunks[did]; exists {
+						dirty = true
+					} else {
+						newBytes.append(bytes[:len(bytes)-len(rest)])
+					}
+					bytes = rest
+				}
+				oids[i] = newBytes.bytes
+			}
+			if dirty {
+				if oids.totalOids() == 0 {
+					cur.Del(0)
+				} else {
+					buf := new(myBuf)
+					buf.appendOids(oids)
+					cur.Put(k, buf.bytes, lmdb.Current)
+				}
+			}
+		})
+	})
 }
 
 func cmdSearch(cfg *lmdbConfigStruct) {
-	fmt.Println("SEARCH")
+	if len(cfg.args) == 0 {
+		usage()
+	}
+	inputGrams := grams(strings.Join(cfg.args, " "))
+	if len(inputGrams) == 0 {
+		os.Exit(1)
+	}
+	cfg.open(false)
+	defer cfg.env.Close()
+	hits := make(map[uint64][][]byte)
+	groups := make([]string, 0, 16)
+	gids := make(map[string]uint64)
+	groupStructs := map[string]*groupStruct{}
+	cfg.view(func() {
+		results := cfg.intersectGrams(inputGrams)
+		for oid := range results {
+			d := cfg.getChunk(cfg.oidKey(oid))
+			hits[d.gid] = append(hits[d.gid], d.data)
+		}
+		for gid := range hits {
+			group := cfg.getGroupWithGid(gid)
+			if group.validity != deleted {
+				gids[group.groupName] = gid
+				groups = append(groups, group.groupName)
+				groupStructs[group.groupName] = group
+			} else {
+				delete(hits, gid)
+			}
+		}
+	})
+	sort.Strings(groups)
+	if cfg.candidates {
+		for _, grpNm := range groups {
+			var grams []string
+			for _, data := range hits[gids[grpNm]] {
+				grams = append(grams, string(data))
+			}
+			sort.Strings(grams)
+			if cfg.separate {
+				for _, data := range grams {
+					fmt.Printf("%s: %s\n", grpNm, data)
+				}
+			} else {
+				fmt.Printf("%s:", grpNm)
+				for _, data := range grams {
+					fmt.Printf(" %s", data)
+				}
+				fmt.Println()
+			}
+		}
+	} else {
+		for _, group := range groups {
+			stat, err := os.Stat(group)
+			if err != nil {
+				exitError("Could not read file " + group)
+			} else if stat.ModTime().After(groupStructs[group].lastChanged) {
+				exitError(fmt.Sprintf("File has changed since indexing: %s", group))
+			}
+		}
+		for _, group := range groups {
+			var chunkStarts []int
+			lineNos := make(map[uint64]uint64)
+			chunkEnds := make(map[uint64]uint64)
+			for _, data := range hits[gids[group]] {
+				lineNo, data := getNumOrPanic(data)
+				start, data := getNumOrPanic(data)
+				len, _ := getNumOrPanic(data)
+				lineNos[start] = lineNo
+				chunkStarts = append(chunkStarts, int(start))
+				chunkEnds[start] = start + len
+			}
+			sort.Ints(chunkStarts)
+			contents, err := ioutil.ReadFile(group)
+			if err != nil {
+				exitError(fmt.Sprintf("Could not read file: %s", group))
+			}
+			out := ""
+			if cfg.numbers {
+				out = group + ":"
+			}
+		eachChunk:
+			for _, st := range chunkStarts {
+				start := uint64(st)
+				chunk := string(contents[start:chunkEnds[start]])
+			args:
+				for _, arg := range cfg.args {
+					testChunk := chunk
+					for len(testChunk) > 0 {
+						i := strings.Index(testChunk, arg)
+						if i == -1 {break}
+						if cfg.partial || ((i == 0 || !isGramChar(testChunk[i-1])) &&
+							(i+len(arg) == len(testChunk) || !isGramChar(testChunk[i+len(arg)]))) {
+							continue args // found a hit for this arg
+						}
+						testChunk = testChunk[len(arg):]
+					}
+					continue eachChunk // if it made it to here, the arg isn't in the line
+				}
+				if cfg.numbers {
+					out = fmt.Sprintf("%s %d", out, lineNos[start])
+				} else {
+					fmt.Printf("%s:%d:%s\n", group, lineNos[start], chunk)
+				}
+			}
+			if cfg.numbers {
+				fmt.Println(out)
+			}
+		}
+	}
 }
 
-func cmdData(cfg *lmdbConfigStruct) {
-
-	fmt.Println("DATA")
+func isGramChar(c byte) bool {
+	return ('0' <= c && c <= '9') || ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z')
 }
 
-func (cfg *lmdbConfigStruct) getTag(key []byte) *oidList {
-	result := new(oidList)
-	bytes := cfg.get(cfg.tagsDb, key)
-	readOidList(result, bytes)
-	return result
+func (cfg *lmdbConfigStruct) intersectGrams(inputGrams map[gram]struct{}) map[uint64]struct{} {
+	hits := make(map[gram]*oidList)
+	smallest := gram(0)
+	smallestSize := maxInt
+	var results map[uint64]struct{}
+
+	for grm := range inputGrams {
+		oids := cfg.getGram(grm)
+		if oids == nil {
+			os.Exit(1)
+		}
+		hits[grm] = oids
+		if oids.totalOids() < smallestSize {
+			smallestSize = oids.totalOids()
+			smallest = grm
+		}
+	}
+	results = hits[smallest].allOids()
+	for grm, oids := range hits { // intersect the grams' oids
+		if grm == smallest {continue}
+		cur := oids.allOids()
+		for oid := range results {
+			_, includes := cur[oid]
+			if !includes { // filter oids that are not common to all grams out of results
+				delete(results, oid)
+				if len(results) == 0 {
+					os.Exit(1)
+				}
+			}
+		}
+	}
+	return results
 }
 
-func (cfg *lmdbConfigStruct) getObject(key []byte) *doc {
-	bytes := cfg.get(cfg.objectDb, key)
-	result := new(doc)
-	result.original = bytes
-	groupName, bytes := getCountedBytes(bytes)
-	result.groupName = string(groupName)
+func (cfg *lmdbConfigStruct) getGram(grm gram) *oidList {
+	if cfg.dirtyGrams[grm] != nil {return cfg.dirtyGrams[grm]}
+	return cfg.getOidList(cfg.gramDb, cfg.gramKeyForGram(grm))
+}
+
+func (cfg *lmdbConfigStruct) putGram(key []byte, oids *oidList) {
+	buf := new(myBuf)
+	buf.appendOids(oids)
+	cfg.put(cfg.gramDb, key, buf.bytes)
+}
+
+func (cfg *lmdbConfigStruct) getGroup(name string) (uint64, *groupStruct) {
+	if cfg.dirtyGroup != nil && cfg.dirtyGroup.groupName == name {return cfg.dirtyGroupGid, cfg.dirtyGroup}
+	bytes := cfg.get(cfg.groupNameDb, []byte(name))
+	if bytes == nil {return 0, nil}
+	gid, _ := getNumOrPanic(bytes)
+	return gid, cfg.getGroupWithGidBytes(bytes)
+}
+
+func (cfg *lmdbConfigStruct) getGroupWithGid(gid uint64) *groupStruct {
+	return cfg.getGroupWithGidBytes(cfg.numBytes(gid))
+}
+
+func (cfg *lmdbConfigStruct) getGroupWithGidBytes(gid []byte) *groupStruct {
+	return decodeGroup(cfg.get(cfg.groupDb, gid))
+}
+
+func decodeGroup(bytes []byte) *groupStruct {
+	if bytes == nil {return nil}
+	group := new(groupStruct)
+	nm, bytes := getCountedBytes(bytes)
+	group.groupName = string(nm)
+	oidCount, bytes := getNumOrPanic(bytes)
+	group.oidCount = oidCount
+	group.validity = bytes[0]
+	lastModSec, bytes := getNumOrPanic(bytes[1:])
+	lastModNanos, _ := getNumOrPanic(bytes)
+	group.lastChanged = time.Unix(int64(lastModSec), int64(lastModNanos))
+	return group
+}
+
+func (cfg *lmdbConfigStruct) putGroup(gid uint64, grp *groupStruct) {
+	buf := new(myBuf)
+	buf.putCountedBytes([]byte(grp.groupName))
+	buf.putNum(grp.oidCount)
+	buf.next(1)[0] = grp.validity
+	buf.putNum(uint64(grp.lastChanged.Unix()))
+	buf.putNum(uint64(grp.lastChanged.Nanosecond()))
+	cfg.put(cfg.groupDb, cfg.numBytes(gid), buf.bytes)
+}
+
+func (cfg *lmdbConfigStruct) createGroup() (gid uint64, group *groupStruct) {
+	if len(cfg.freeGids) > 0 {
+		var rest []byte
+		gid, rest = getNumOrPanic(cfg.freeGids)
+		cfg.freeGids = rest
+	} else {
+		gid = cfg.nextGID
+		cfg.nextGID++
+		cfg.dirty = true
+	}
+	group = new(groupStruct)
+	group.groupName = cfg.groupName()
+	cfg.dirtyGroupGid = gid
+	cfg.dirtyGroup = group
+	cfg.dirtyName = true
+	return
+}
+
+func (cfg *lmdbConfigStruct) deleteGroup() {
+	gid, grp := cfg.getGroup(cfg.groupName())
+	if grp == nil {return}
+	grp.validity = deleted
+	cfg.putGroup(gid, grp)
+	cfg.del(cfg.groupNameDb, []byte(cfg.groupName()))
+}
+
+func (cfg *lmdbConfigStruct) getChunk(key []byte) *chunk {
+	return decodeChunk(cfg.get(cfg.chunkDb, key))
+}
+
+func decodeChunk(bytes []byte) *chunk {
+	result := new(chunk)
+	result.gid, bytes = getNumOrPanic(bytes)
 	data, bytes := getCountedBytes(bytes)
 	result.data = data
-	result.tags = (*[1 << 48]uint16)(unsafe.Pointer(&bytes[0]))[0 : len(bytes)/2 : len(bytes)/2]
+	g, bytes := getNumOrPanic(bytes)
+	result.gramCount = uint16(g)
 	return result
 }
 
-func (cfg *lmdbConfigStruct) getGroup(key []byte) *oidList {
-	result := new(oidList)
-	bytes := cfg.get(cfg.groupDb, key)
-	readOidList(result, bytes)
-	return result
+func (cfg *lmdbConfigStruct) putChunk(key []byte, d *chunk) {
+	buf := new(myBuf)
+	buf.putNum(d.gid)
+	buf.putCountedBytes(d.data)
+	buf.putNum(uint64(d.gramCount))
+	cfg.put(cfg.chunkDb, key, buf.bytes)
 }
 
 func (cfg *lmdbConfigStruct) get(db lmdb.DBI, key []byte) []byte {
 	buf, err := cfg.txn.Get(db, key)
-	if err == lmdb.NotFound {return nil}
+	if lmdb.IsErrno(err, lmdb.NotFound) {return nil}
 	check(err)
 	return buf
-}
-
-func (cfg *lmdbConfigStruct) putObject(key []byte, val []byte) {
-	cfg.put(cfg.objectDb, key, val)
-}
-
-func (cfg *lmdbConfigStruct) putName(key []byte, val []byte) {
-	cfg.put(cfg.groupDb, key, val)
-}
-
-func (cfg *lmdbConfigStruct) putTag(key []byte, oids *oidList) {
-	cfg.put(cfg.tagsDb, key, oids.appendTo(make([]byte, oids.total())))
 }
 
 func (cfg *lmdbConfigStruct) put(db lmdb.DBI, key []byte, val []byte) {
@@ -410,33 +1064,62 @@ func (cfg *lmdbConfigStruct) put(db lmdb.DBI, key []byte, val []byte) {
 	check(err)
 }
 
-func (cfg *lmdbConfigStruct) update(code func()) {
-	cfg.env.Update(func(txn *lmdb.Txn) error {
-		defer func() {
-			cfg.txn = nil
-			cfg.objectDb = lmdb.DBI(0xFFFFFFFF)
-			cfg.groupDb = lmdb.DBI(0xFFFFFFFF)
-			cfg.tagsDb = lmdb.DBI(0xFFFFFFFF)
-		}()
-		cfg.txn = txn
-		objects, err := txn.OpenDBI("objects", 0)
-		check(err)
-		tags, err := txn.OpenDBI("tags", 0)
-		check(err)
-		names, err := txn.OpenDBI("names", 0)
-		check(err)
-		cfg.objectDb = objects
-		cfg.groupDb = names
-		cfg.tagsDb = tags
-		code()
-		return nil
-	})
+func (cfg *lmdbConfigStruct) del(db lmdb.DBI, key []byte) {
+	err := cfg.txn.Del(db, key, nil)
+	check(err)
 }
 
-func putNumOrPanic(number uint64, buf []byte) []byte {
-	buf, err := putNum(number, buf)
+func (cfg *lmdbConfigStruct) update(code func()) {
+	err := cfg.env.Update(func(txn *lmdb.Txn) error {
+		cfg.runTxn(txn, 0, func() {
+			code()
+			cfg.storeDirty()
+		})
+		return nil
+	})
 	check(err)
-	return buf
+	cfg.env.Close()
+}
+
+func (cfg *lmdbConfigStruct) view(code func()) {
+	err := cfg.env.View(func(txn *lmdb.Txn) error {
+		cfg.runTxn(txn, 0, code)
+		return nil
+	})
+	check(err)
+}
+
+func (cfg *lmdbConfigStruct) runTxn(txn *lmdb.Txn, flags uint, code func()) {
+	defer func() {
+		cfg.txn = nil
+		cfg.chunkDb = lmdb.DBI(0xFFFFFFFF)
+		cfg.groupDb = lmdb.DBI(0xFFFFFFFF)
+		cfg.groupNameDb = lmdb.DBI(0xFFFFFFFF)
+		cfg.gramDb = lmdb.DBI(0xFFFFFFFF)
+	}()
+	cfg.txn = txn
+	chunks, err := txn.OpenDBI("chunks", flags)
+	check(err)
+	grams, err := txn.OpenDBI("grams", flags)
+	check(err)
+	groups, err := txn.OpenDBI("groups", flags)
+	check(err)
+	groupNames, err := txn.OpenDBI("groupNames", flags)
+	check(err)
+	cfg.chunkDb = chunks
+	cfg.groupDb = groups
+	cfg.groupNameDb = groupNames
+	cfg.gramDb = grams
+	code()
+}
+
+func numSize(number uint64) int {
+	if number < 1<<7 {return 1}
+	offset := 0
+	for tmp := number >> 12; tmp > 0; offset++ {
+		tmp >>= 8
+	}
+	return offset + 2
 }
 
 //stores a number high-low
@@ -447,9 +1130,7 @@ func putNum(number uint64, buf []byte) ([]byte, error) {
 		return buf[1:], nil
 	}
 	offset := 0
-	tmp := number >> 12
-	for tmp > 0 {
-		offset++
+	for tmp := number >> 12; tmp > 0; offset++ {
 		tmp >>= 8
 	}
 	var first = 0x80 | byte(offset<<4)
@@ -466,7 +1147,7 @@ func putNum(number uint64, buf []byte) ([]byte, error) {
 
 func getCountedBytes(bytes []byte) (result []byte, rest []byte) {
 	len, bytes := getNumOrPanic(bytes)
-	result = bytes[0:len]
+	result = bytes[:len]
 	rest = bytes[len:]
 	return
 }
@@ -489,50 +1170,13 @@ func getNum(buf []byte) (uint64, []byte, error) {
 	return result, buf[bytes:], nil
 }
 
-func testNums() {
-	nums := []uint64{
-		0,
-		127,
-		128,
-		4095,
-		4096,
-		1048575,
-		1048576,
-		268435455,
-		268435456,
-		68719476735,
-		68719476736,
-		17592186044415,
-		17592186044416,
-		4503599627370495,
-		4503599627370496,
-		1152921504606846975,
-		1152921504606846976,
-		18446744073709551615,
-	}
-	for b := 0; b < len(nums); b++ {
-		buf := make([]byte, 9)
-		next, err := putNum(nums[b], buf)
-		if err != nil {
-			panic(err)
-		}
-		verify, gNext, err := getNum(buf)
-		if verify != nums[b] {
-			panic(fmt.Sprintf("ERROR: expected <%d> but got <%d>, buf = %v", nums[b], verify, buf))
-		} else if len(buf)-len(next) != b/2+1 {
-			panic(fmt.Sprintf("ERROR: expected number of length <%d> but got <%d>", b/2+1, len(buf)-len(next)))
-		} else if len(gNext) != len(next) {
-			panic(fmt.Sprintf("ERROR: expected bytes written to be <%d> but was <%d>", b/2+1, len(buf)-len(gNext)))
-		}
-	}
-}
-
 var cmds = map[string]func(*lmdbConfigStruct){
-	"stat":   cmdStat,
-	"create": cmdCreate,
-	"grams":  cmdTags,
-	"doc":    cmdText,
-	"delete": cmdDelete,
-	"search": cmdSearch,
-	"data":   cmdData,
+	"create":  cmdCreate,
+	"chunk":   cmdChunk,
+	"input":   cmdInput,
+	"delete":  cmdDelete,
+	"search":  cmdSearch,
+	"grams":   cmdGrams,
+	"info":    cmdInfo,
+	"compact": cmdCompact,
 }

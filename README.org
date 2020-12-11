@@ -1,0 +1,78 @@
+* Microfts
+A small full text indexing and search tool focusing on speed and
+space.  Initial tests seem to indicate that the database takes about
+twice as much space as the files it indexes.
+
+Microfts uses [[http://www.lmdb.tech/doc/index.html][LMDB]] for its database and [[https://github.com/AskAlexSharov/lmdb-go/lmdb][AskAlexSharov's fork]] of
+[[https://github.com/bmatsuo/lmdb-goto][bmatsuo's Go package]] to connect to it.
+
+* LICENSE
+
+Microfts is MIT licensed, (c) 2020 Bill Burdick. All rights reserved.
+
+* Usage
+#+begin_example
+Usage:
+   fulltext sql [-v] DB FILE FILE-ID
+                   generate SQL for FILE
+   fulltext info [-dx | -nx | -grams | -gx] DB [GROUP]
+                   print info for database or GROUP
+                   displays any groups which do not exist as files
+                   displays any groups which refer to files that have changed
+   fulltext create [-s GRAMSIZE] DB
+                   create DATABASE if it does not exist
+   fulltext chunk [-nx | -data D | -dx] -d DELIM DB GROUP GRAMS
+   fulltext chunk [-nx | -data D | -dx] -gx DB GROUP GRAMS
+                   ADD a chunk to GROUP with GRAMS.
+                   -d means use DELIM to split GRAMS.
+                   -gx means GRAMS is hex encoded with two bytes for each gram using base 37.
+   fulltext grams [-gx] CHUNK
+                   output grams for CHUNK
+   fulltext input [-nx | -dx | -file] DB GROUP
+                   Create GROUP and add a CHUNK for each line of input.
+                   Chunk data is the number, offset, and length for each line (starting at 1).
+                   -file means GROUP is the name of the file to use instead of stdin.
+   fulltext delete [-nx] DB GROUP
+                   delete GROUP, its chunks, and tag entries.
+                   NOTE: THIS DOES NOT RECLAIM SPACE! USE COMPACT FOR THAT
+   fulltext compact DB
+                   Reclaim space for deleted groups
+   fulltext search [-n | -partial] DB TEXT
+                   query with TEXT for objects
+   fulltext search -candidates [-grams | -d D | -gx | -sep | -n | -partial] DB TERMS
+                   find all candidates with the grams for TERMS
+                   -grams indicates TERMS are grams, otherwise extract grams from TERMS
+   fulltext data [-nx | -dx] DB GROUP
+                   get data for each doc in GROUP
+
+   fulltext is targeted for groups of small documents, like lines in a file.
+
+  -candidates
+    	return docs with grams for search
+  -comp string
+    	compression type to use when creating a database
+  -d string
+    	delimiter for unicode tags (default ",")
+  -data string
+    	data to define for object
+  -dx
+    	use hex instead of unicode for object data
+  -file
+    	GROUP is the path to the input file
+  -grams
+    	get: specify tags for intead of text
+    	info: print gram coverage
+    	search: specify grams instead of search terms
+  -gx
+    	use hex instead of unicode for grams
+  -n	only print line numbers for search
+  -org
+    	index org-mode chunks instead of lines
+  -partial
+    	search: allow partial matches in search
+  -s int
+    	gram size
+  -sep
+    	print candidates on separate lines
+  -v	verbose
+#+end_example

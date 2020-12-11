@@ -1,6 +1,2 @@
 github.com/AskAlexSharov/lmdb-go v1.9.1 h1:ROug+G/RC1t7cFnMWUiAnFL3ul13/MXnovST7kUnodA=
 github.com/AskAlexSharov/lmdb-go v1.9.1/go.mod h1:k7Jo/kN60Hq1MTBwsVSp2JllEs5Tyhd4MZ7tY9smjeA=
-github.com/mattn/go-sqlite3 v1.14.5 h1:1IdxlwTNazvbKJQSxoJ5/9ECbEeaTTyeU7sEAZ5KKTQ=
-github.com/mattn/go-sqlite3 v1.14.5/go.mod h1:WVKg1VTActs4Qso6iwGbiFih2UIHo0ENGwNd0Lj+XmI=
-github.com/pkg/profile v1.5.0 h1:042Buzk+NhDI+DeSAA62RwJL8VAuZUMQZUjCsRz1Mug=
-github.com/pkg/profile v1.5.0/go.mod h1:qBsxPvzyUincmltOk6iyRVxHYg4adc0OFOv72ZdLa18=

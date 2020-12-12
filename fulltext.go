@@ -274,13 +274,14 @@ func main() {
 	flag.BoolVar(&lmdbConfig.gramHex, "gx", false, "use hex instead of unicode for grams")
 	flag.BoolVar(&lmdbConfig.dataHex, "dx", false, "use hex instead of unicode for object data")
 	flag.StringVar(&lmdbConfig.dataString, "data", "", "data to define for object")
-	flag.BoolVar(&lmdbConfig.file, "file", false, "GROUP is the path to the input file")
+	flag.BoolVar(&lmdbConfig.stdin, "", false, "read from stdin instead of a file named GROUP")
 	flag.BoolVar(&lmdbConfig.candidates, "candidates", false, "return docs with grams for search")
 	flag.BoolVar(&lmdbConfig.separate, "sep", false, "print candidates on separate lines")
 	flag.BoolVar(&lmdbConfig.numbers, "n", false, "only print line numbers for search")
 	flag.BoolVar(&lmdbConfig.org, "org", false, "index org-mode chunks instead of lines")
 	flag.BoolVar(&lmdbConfig.partial, "partial", false, "search: allow partial matches in search")
 	flag.BoolVar(&lmdbConfig.force, "f", false, "search: continue even if files are changed or missing")
+	flag.BoolVar(&lmdbConfig.test, "t", false, "update: do a test run, printing what would have happened")
 	flag.StringVar(&lmdbConfig.compression, "comp", "", "compression type to use when creating a database")
 	flag.BoolVar(&lmdbConfig.grams, "grams", false, "get: specify tags for intead of text\n"+
 		"info: print gram coverage\n"+
@@ -318,10 +319,10 @@ func printUsage() {
                    -gx means GRAMS is hex encoded with two bytes for each gram using base 37.
    `+prog+` grams [-gx] CHUNK
                    output grams for CHUNK
-   `+prog+` input [-nx | -dx | -file] DB GROUP
+   `+prog+` input [-nx | -dx | -] DB GROUP...
                    Create GROUP and add a CHUNK for each line of input.
                    Chunk data is the number, offset, and length for each line (starting at 1).
-                   -file means GROUP is the name of the file to use instead of stdin.
+                   - means to read from stdin, otherwise GROUP is the name of the input file
    `+prog+` delete [-nx] DB GROUP
                    delete GROUP, its chunks, and tag entries.
                    NOTE: THIS DOES NOT RECLAIM SPACE! USE COMPACT FOR THAT
@@ -335,6 +336,10 @@ func printUsage() {
                    -grams indicates TERMS are grams, otherwise extract grams from TERMS
    `+prog+` data [-nx | -dx] DB GROUP
                    get data for each doc in GROUP
+   `+prog+` update [-t] DB
+                   reinput files that have changed
+                   delete files that have been removed
+                   -t means do a test run, printing what would have happened
 
    `+prog+` is targeted for groups of small documents, like lines in a file.
 

@@ -117,12 +117,13 @@ type lmdbConfigStruct struct {
 	dataHex     bool
 	dataString  string
 	grams       bool
-	file        bool
+	stdin       bool
 	candidates  bool
 	separate    bool
 	numbers     bool
 	compression string
 	force       bool
+	test        bool
 }
 
 var lmdbConfig lmdbConfigStruct
@@ -185,23 +186,28 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 		if len(cfg.args) == 0 {
 			stat, err := cfg.txn.Stat(cfg.groupDb)
 			check(err)
-			fmt.Printf("Groups: %d\n", stat.Entries)
+			groups := int(stat.Entries)
 			stat, err = cfg.txn.Stat(cfg.groupNameDb)
 			check(err)
-			fmt.Printf("Group names: %d\n", stat.Entries)
+			groupNames := stat.Entries
 			stat, err = cfg.txn.Stat(cfg.chunkDb)
 			check(err)
-			chunkTot := float64(stat.Entries)
-			fmt.Printf("Chunks: %d\n", stat.Entries)
+			chunks := float64(stat.Entries)
 			stat, err = cfg.txn.Stat(cfg.gramDb)
 			check(err)
 			gramTot := stat.Entries
 			gramTot--
-			fmt.Printf("Grams: %d\n", gramTot)
 			staleGroups := map[string]string{}
 			staleGroupNames := []string{}
+			deletedGroups := map[uint64]struct{}{}
+			deletedChunks := 0
 			cfg.iterate(cfg.groupDb, func(cur *lmdb.Cursor, k, v []byte) {
+				gid, _ := getNumOrPanic(k)
 				group := decodeGroup(v)
+				if group.validity == deleted {
+					deletedGroups[gid] = member
+					return
+				}
 				stat, err := os.Stat(group.groupName)
 				if os.IsNotExist(err) {
 					staleGroups[group.groupName] = "File %s does not exist"
@@ -211,13 +217,29 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 					staleGroups[group.groupName] = "File %s has changes"
 				}
 			})
+			cfg.iterate(cfg.chunkDb, func(cur *lmdb.Cursor, k, v []byte) {
+				chunk := decodeChunk(v)
+				if _, deleted := deletedGroups[chunk.gid]; deleted {
+					deletedChunks++
+				}
+			})
+			groups -= len(deletedGroups)
+			groups -= len(staleGroups)
+			chunks -= float64(deletedChunks)
+			fmt.Printf("%-15s %d\n", "Group names:", groupNames)
+			fmt.Printf("%-15s %d\n", "Groups:", groups)
+			fmt.Printf("%-15s %d\n", "Deleted groups:", len(deletedGroups))
+			fmt.Printf("%-15s %d\n", "Bad groups:", len(staleGroups))
+			fmt.Printf("%-15s %d\n", "Chunks:", int64(chunks))
+			fmt.Printf("%-15s %d\n", "Deleted chunks:", deletedChunks)
+			fmt.Printf("%-15s %d\n", "Grams:", gramTot)
 			if len(staleGroups) > 0 {
 				for group := range staleGroups {
 					staleGroupNames = append(staleGroupNames, group)
 				}
 				sort.Strings(staleGroupNames)
 				for _, group := range staleGroupNames {
-					fmt.Printf(staleGroups[group]+"\n", group)
+					fmt.Fprintf(os.Stderr, staleGroups[group]+"\n", group)
 				}
 			}
 			if cfg.grams {
@@ -277,7 +299,7 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 						maxOids = oidTot
 					}
 					for amt := range coverage {
-						if float64(oidTot)/float64(chunkTot) <= amt {
+						if float64(oidTot)/float64(chunks) <= amt {
 							coverage[amt]++
 						}
 					}
@@ -286,6 +308,9 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 					check(err)
 				}
 				cur.Close()
+				if minOids == maxInt {
+					minOids = 0
+				}
 				fmt.Printf("total bytes: %d\n", totalBytes)
 				fmt.Printf("chunk bytes: %d\n", chunkBytes)
 				fmt.Printf("gram bytes: %d\n", gramBytes)
@@ -353,94 +378,93 @@ func cmdChunk(cfg *lmdbConfigStruct) {
 }
 
 func cmdInput(cfg *lmdbConfigStruct) {
-	var date time.Time
-	if len(cfg.args) != 1 { // only GROUP and DATABASE
+	if len(cfg.args) == 0 { // DATABASE and at least one GROUP
 		usage()
 	}
-	if cfg.file {
-		stat, err := os.Stat(cfg.groupName())
-		check(err)
-		date = stat.ModTime()
-		input, err := os.OpenFile(cfg.groupName(), os.O_RDONLY, 0)
-		check(err)
-		cfg.input = bufio.NewReader(input)
-	} else {
-		cfg.input = bufio.NewReader(os.Stdin)
-	}
+	cfg.open(true)
+	defer cfg.env.Close()
+	cfg.update(func() {
+		for len(cfg.args) > 0 {
+			cfg.index(cfg.args[0], cfg.stdin)
+			cfg.storeDirtyGroup()
+			if cfg.stdin {break}
+			cfg.args = cfg.args[1:]
+		}
+	})
+}
+
+func (cfg *lmdbConfigStruct) index(group string, stdin bool) {
+	cfg.stdin = stdin
 	if cfg.org {
-		cfg.indexOrg(date)
+		cfg.indexOrg(group, stdin)
 	} else {
-		cfg.indexLines(date)
+		cfg.indexLines(group, stdin)
 	}
 }
 
-func (cfg *lmdbConfigStruct) openInputFile(date time.Time) bool {
-	if cfg.file {
-		_, grp := cfg.getGroup(cfg.groupName())
-		if grp != nil && grp.lastChanged.Equal(date) {return false}
-		input, err := os.OpenFile(cfg.groupName(), os.O_RDONLY, 0)
-		check(err)
-		cfg.input = bufio.NewReader(input)
-	} else {
+func (cfg *lmdbConfigStruct) openInputFile(group string, stdin bool) (bool, time.Time) {
+	if stdin {
 		cfg.input = bufio.NewReader(os.Stdin)
+		return true, time.Now()
 	}
-	return true
+	stat, err := os.Stat(group)
+	check(err)
+	date := stat.ModTime()
+	_, grp := cfg.getGroup(group)
+	if grp != nil && grp.lastChanged.Equal(date) {return false, time.Now()}
+	cfg.deleteGroupByName(group)
+	input, err := os.OpenFile(group, os.O_RDONLY, 0)
+	check(err)
+	cfg.input = bufio.NewReader(input)
+	return true, date
 }
 
-func (cfg *lmdbConfigStruct) indexOrg(date time.Time) {
+func (cfg *lmdbConfigStruct) indexOrg(group string, stdin bool) {
 	contents, err := ioutil.ReadAll(cfg.input)
 	check(err)
 	str := string(contents)
-	cfg.open(true)
-	defer cfg.env.Close()
-	cfg.update(func() {
-		if !cfg.openInputFile(date) {return}
-		_, grp := cfg.getGroup(cfg.groupName())
-		if grp != nil && grp.lastChanged.Equal(date) {return}
-		cfg.deleteGroup()
-		forParts(str, func(line, typ, start, end int) {
-			g := grams(str[start:end])
-			if len(g) > 0 {
-				buf := new(myBuf)
-				buf.putNum(uint64(line))
-				buf.putNum(uint64(start))
-				buf.putNum(uint64(end - start))
-				cfg.data = buf.bytes
-				oid, d := cfg.initChunk() // make chunk for chunk
-				for grm := range g {
-					cfg.addGramEntry(grm, oid, d)
-				}
-				cfg.putChunk(oid, d)
-			}
-		})
-		cfg.dirtyGroup.lastChanged = date
-	})
-}
-
-func (cfg *lmdbConfigStruct) indexLines(date time.Time) {
-	cfg.open(true)
-	defer cfg.env.Close()
-	cfg.update(func() {
-		if !cfg.openInputFile(date) {return}
-		cfg.deleteGroup()
-		pos := 0
-		for lineNo := 1; ; lineNo++ {
-			line, err := readLine(cfg.input)
-			if err == io.EOF {break}
+	open, date := cfg.openInputFile(group, stdin)
+	if !open {return}
+	_, grp := cfg.getGroup(group)
+	if grp != nil && grp.lastChanged.Equal(date) {return}
+	forParts(str, func(line, typ, start, end int) {
+		g := grams(str[start:end])
+		if len(g) > 0 {
 			buf := new(myBuf)
-			buf.putNum(uint64(lineNo))
-			buf.putNum(uint64(pos))
-			buf.putNum(uint64(len(line)))
+			buf.putNum(uint64(line))
+			buf.putNum(uint64(start))
+			buf.putNum(uint64(end - start))
 			cfg.data = buf.bytes
-			oid, d := cfg.initChunk() // make chunk for line
-			for grm := range grams(line) {
+			oid, d := cfg.initChunk() // make chunk for chunk
+			for grm := range g {
 				cfg.addGramEntry(grm, oid, d)
 			}
 			cfg.putChunk(oid, d)
-			pos += len(line)
 		}
-		cfg.dirtyGroup.lastChanged = date
 	})
+	grp.lastChanged = date
+}
+
+func (cfg *lmdbConfigStruct) indexLines(group string, stdin bool) {
+	open, date := cfg.openInputFile(group, stdin)
+	if !open {return}
+	pos := 0
+	for lineNo := 1; ; lineNo++ {
+		line, err := readLine(cfg.input)
+		if err == io.EOF {break}
+		buf := new(myBuf)
+		buf.putNum(uint64(lineNo))
+		buf.putNum(uint64(pos))
+		buf.putNum(uint64(len(line)))
+		cfg.data = buf.bytes
+		oid, d := cfg.initChunk() // make chunk for line
+		for grm := range grams(line) {
+			cfg.addGramEntry(grm, oid, d)
+		}
+		cfg.putChunk(oid, d)
+		pos += len(line)
+	}
+	cfg.dirtyGroup.lastChanged = date
 }
 
 func readLine(reader *bufio.Reader) (string, error) {
@@ -658,6 +682,16 @@ func (cfg *lmdbConfigStruct) storeDirty() {
 	if cfg.dirty {
 		cfg.store()
 	}
+	cfg.storeDirtyGroup()
+	if len(cfg.dirtyGrams) > 0 {
+		for grm, oids := range cfg.dirtyGrams {
+			cfg.putGram(cfg.gramKeyForGram(grm), oids)
+		}
+	}
+	cfg.clean()
+}
+
+func (cfg *lmdbConfigStruct) storeDirtyGroup() {
 	if cfg.dirtyGroup != nil {
 		cfg.putGroup(cfg.dirtyGroupGid, cfg.dirtyGroup)
 		if cfg.dirtyName {
@@ -665,13 +699,9 @@ func (cfg *lmdbConfigStruct) storeDirty() {
 			buf.putNum(cfg.dirtyGroupGid)
 			cfg.put(cfg.groupNameDb, []byte(cfg.dirtyGroup.groupName), buf.bytes)
 		}
+		cfg.dirtyGroup = nil
+		cfg.dirtyName = false
 	}
-	if len(cfg.dirtyGrams) > 0 {
-		for grm, oids := range cfg.dirtyGrams {
-			cfg.putGram(cfg.gramKeyForGram(grm), oids)
-		}
-	}
-	cfg.clean()
 }
 
 func (cfg *lmdbConfigStruct) clean() {
@@ -810,6 +840,45 @@ func cmdCompact(cfg *lmdbConfigStruct) {
 	})
 }
 
+func cmdUpdate(cfg *lmdbConfigStruct) {
+	if len(cfg.args) != 0 {
+		usage()
+	}
+	cfg.open(true)
+	defer cfg.env.Close()
+	cfg.update(func() {
+		deleteGroups := map[string]struct{}{}
+		updateGroups := map[string]struct{}{}
+		cfg.iterate(cfg.groupDb, func(cur *lmdb.Cursor, k, v []byte) {
+			group := decodeGroup(v)
+			stat, err := os.Stat(group.groupName)
+			if err != nil {
+				deleteGroups[group.groupName] = member
+			} else if stat.ModTime().After(group.lastChanged) {
+				updateGroups[group.groupName] = member
+			}
+		})
+		for group := range deleteGroups {
+			if cfg.test {
+				fmt.Printf("Delete '%s' because it is missing", group)
+			} else {
+				cfg.deleteGroupByName(group)
+			}
+		}
+		for group := range updateGroups {
+			if cfg.test {
+				fmt.Printf("Input '%s' because it has changed", group)
+			} else {
+				cfg.args = []string{group}
+				cfg.index(group, false)
+				if cfg.dirtyGroup != nil {
+					cfg.putGroup(cfg.dirtyGroupGid, cfg.dirtyGroup)
+				}
+			}
+		}
+	})
+}
+
 func cmdSearch(cfg *lmdbConfigStruct) {
 	if len(cfg.args) == 0 {
 		usage()
@@ -824,6 +893,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 	groups := make([]string, 0, 16)
 	gids := make(map[string]uint64)
 	groupStructs := map[string]*groupStruct{}
+	deletedGroups := map[uint64]struct{}{}
 	cfg.view(func() {
 		results := cfg.intersectGrams(inputGrams)
 		for oid := range results {
@@ -832,18 +902,19 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		}
 		for gid := range hits {
 			group := cfg.getGroupWithGid(gid)
-			if group.validity != deleted {
+			if group != nil && group.validity != deleted {
 				gids[group.groupName] = gid
 				groups = append(groups, group.groupName)
 				groupStructs[group.groupName] = group
 			} else {
-				delete(hits, gid)
+				deletedGroups[gid] = member
 			}
 		}
 	})
 	sort.Strings(groups)
 	if cfg.candidates {
 		for _, grpNm := range groups {
+			if _, deleted := deletedGroups[gids[grpNm]]; deleted {continue}
 			var grams []string
 			for _, data := range hits[gids[grpNm]] {
 				grams = append(grams, string(data))
@@ -870,6 +941,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			badFiles[group] = fmt.Sprintf(msg, group)
 		}
 		for _, group := range groups {
+			if _, deleted := deletedGroups[gids[group]]; deleted {continue}
 			stat, err := os.Stat(group)
 			if err != nil && cfg.force {
 				bad("Skipping '%s' because it is missing", group)
@@ -884,6 +956,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			}
 		}
 		for _, group := range groups {
+			if _, deleted := deletedGroups[gids[group]]; deleted {continue}
 			if msg, isBad := badFiles[group]; isBad {
 				fmt.Fprintln(os.Stderr, msg)
 				continue
@@ -929,6 +1002,9 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				if cfg.numbers {
 					out = fmt.Sprintf("%s %d", out, lineNos[start])
 				} else {
+					if chunk != "" && chunk[len(chunk)-1] == '\n' {
+						chunk = chunk[:len(chunk)-1]
+					}
 					fmt.Printf("%s:%d:%s\n", group, lineNos[start], chunk)
 				}
 			}
@@ -1047,11 +1123,15 @@ func (cfg *lmdbConfigStruct) createGroup() (gid uint64, group *groupStruct) {
 }
 
 func (cfg *lmdbConfigStruct) deleteGroup() {
-	gid, grp := cfg.getGroup(cfg.groupName())
+	cfg.deleteGroupByName(cfg.groupName())
+}
+
+func (cfg *lmdbConfigStruct) deleteGroupByName(name string) {
+	gid, grp := cfg.getGroup(name)
 	if grp == nil {return}
 	grp.validity = deleted
 	cfg.putGroup(gid, grp)
-	cfg.del(cfg.groupNameDb, []byte(cfg.groupName()))
+	cfg.del(cfg.groupNameDb, []byte(name))
 }
 
 func (cfg *lmdbConfigStruct) getChunk(key []byte) *chunk {
@@ -1203,4 +1283,5 @@ var cmds = map[string]func(*lmdbConfigStruct){
 	"grams":   cmdGrams,
 	"info":    cmdInfo,
 	"compact": cmdCompact,
+	"update":  cmdUpdate,
 }

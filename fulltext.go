@@ -278,6 +278,7 @@ func main() {
 	flag.BoolVar(&lmdbConfig.separate, "sep", false, "print candidates on separate lines")
 	flag.BoolVar(&lmdbConfig.numbers, "n", false, "only print line numbers for search")
 	flag.BoolVar(&lmdbConfig.org, "org", false, "index org-mode chunks instead of lines")
+	flag.BoolVar(&lmdbConfig.sexp, "sexp", false, "search: output matches as an s-expression ((file (line offset chunk) ... ) ... )")
 	flag.BoolVar(&lmdbConfig.partial, "partial", false, "search: allow partial matches in search")
 	flag.BoolVar(&lmdbConfig.force, "f", false, "search: continue even if files are changed or missing")
 	flag.BoolVar(&lmdbConfig.test, "t", false, "update: do a test run, printing what would have happened")

@@ -120,6 +120,8 @@ Usage:
         gram size
   -sep
         print candidates on separate lines
+  -sexp
+        search: output matches as s-expressions
   -t    update: do a test run, printing what would have happened
   -v    verbose
 #+end_example

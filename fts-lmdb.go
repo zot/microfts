@@ -111,6 +111,7 @@ type lmdbConfigStruct struct {
 	//options
 	partial     bool
 	org         bool
+	sexp        bool
 	gramSize    int
 	delimiter   string
 	gramHex     bool
@@ -413,13 +414,11 @@ func (cfg *lmdbConfigStruct) openInputFile(group string) (bool, time.Time) {
 }
 
 func (cfg *lmdbConfigStruct) indexOrg(group string) {
+	open, date := cfg.openInputFile(group)
+	if !open {return}
 	contents, err := ioutil.ReadAll(cfg.input)
 	check(err)
 	str := string(contents)
-	open, date := cfg.openInputFile(group)
-	if !open {return}
-	_, grp := cfg.getGroup(group)
-	if grp != nil && grp.lastChanged.Equal(date) {return}
 	forParts(str, func(line, typ, start, end int) {
 		g := grams(str[start:end])
 		if len(g) > 0 {
@@ -435,7 +434,7 @@ func (cfg *lmdbConfigStruct) indexOrg(group string) {
 			cfg.putChunk(oid, d)
 		}
 	})
-	grp.lastChanged = date
+	cfg.dirtyGroup.lastChanged = date
 }
 
 func (cfg *lmdbConfigStruct) indexLines(group string) {
@@ -920,6 +919,9 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		}
 	})
 	sort.Strings(groups)
+	if cfg.sexp {
+		fmt.Print("(")
+	}
 	if cfg.candidates {
 		for _, grpNm := range groups {
 			if _, deleted := deletedGroups[gids[grpNm]]; deleted {continue}
@@ -928,7 +930,13 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				grams = append(grams, string(data))
 			}
 			sort.Strings(grams)
-			if cfg.separate {
+			if cfg.sexp {
+				fmt.Printf("(\"%s\"", escape(grpNm))
+				for _, data := range grams {
+					fmt.Printf(" \"%s\"", escape(data))
+				}
+				fmt.Printf(")")
+			} else if cfg.separate {
 				for _, data := range grams {
 					fmt.Printf("%s: %s\n", grpNm, data)
 				}
@@ -986,7 +994,9 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				exitError(fmt.Sprintf("Could not read file: %s", group))
 			}
 			out := ""
-			if cfg.numbers {
+			if cfg.sexp {
+				fmt.Printf("(\"%s\"", escape(group))
+			} else if cfg.numbers {
 				out = group + ":"
 			}
 		eachChunk:
@@ -1007,7 +1017,9 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 					}
 					continue eachChunk // if it made it to here, the arg isn't in the line
 				}
-				if cfg.numbers {
+				if cfg.sexp {
+					fmt.Printf(" (%d %d \"%s\")", lineNos[start], start, escape(chunk))
+				} else if cfg.numbers {
 					out = fmt.Sprintf("%s %d", out, lineNos[start])
 				} else {
 					if chunk != "" && chunk[len(chunk)-1] == '\n' {
@@ -1016,11 +1028,21 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 					fmt.Printf("%s:%d:%s\n", group, lineNos[start], chunk)
 				}
 			}
-			if cfg.numbers {
+			if cfg.sexp {
+				fmt.Print(")")
+			} else if cfg.numbers {
 				fmt.Println(out)
 			}
 		}
 	}
+	if cfg.sexp {
+		fmt.Println(")")
+	}
+}
+
+func escape(str string) string {
+	str = strings.Replace(str, "\\", "\\\\", -1)
+	return strings.Replace(str, "\"", "\\\"", -1)
 }
 
 func isGramChar(c byte) bool {

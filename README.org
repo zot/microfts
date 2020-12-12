@@ -55,68 +55,72 @@ here
 * Usage
 #+begin_example
 Usage:
-   fulltext sql [-v] DB FILE FILE-ID
-                   generate SQL for FILE
-   fulltext info [-dx | -nx | -grams | -gx] DB [GROUP]
+   microfts info [-dx | -nx | -grams | -gx] DB [GROUP]
                    print info for database or GROUP
                    displays any groups which do not exist as files
                    displays any groups which refer to files that have changed
-   fulltext create [-s GRAMSIZE] DB
+   microfts create [-s GRAMSIZE] DB
                    create DATABASE if it does not exist
-   fulltext chunk [-nx | -data D | -dx] -d DELIM DB GROUP GRAMS
-   fulltext chunk [-nx | -data D | -dx] -gx DB GROUP GRAMS
+   microfts chunk [-nx | -data D | -dx] -d DELIM DB GROUP GRAMS
+   microfts chunk [-nx | -data D | -dx] -gx DB GROUP GRAMS
                    ADD a chunk to GROUP with GRAMS.
                    -d means use DELIM to split GRAMS.
                    -gx means GRAMS is hex encoded with two bytes for each gram using base 37.
-   fulltext grams [-gx] CHUNK
+   microfts grams [-gx] CHUNK
                    output grams for CHUNK
-   fulltext input [-nx | -dx | -file] DB GROUP
+   microfts input [-nx | -dx | -] DB GROUP
                    Create GROUP and add a CHUNK for each line of input.
                    Chunk data is the number, offset, and length for each line (starting at 1).
-                   -file means GROUP is the name of the file to use instead of stdin.
-   fulltext delete [-nx] DB GROUP
+                   - means to read from stdin, otherwise GROUP is the name of the input file
+   microfts delete [-nx] DB GROUP
                    delete GROUP, its chunks, and tag entries.
                    NOTE: THIS DOES NOT RECLAIM SPACE! USE COMPACT FOR THAT
-   fulltext compact DB
+   microfts compact DB
                    Reclaim space for deleted groups
-   fulltext search [-n | -partial] DB TEXT
+   microfts search [-n | -partial | -f] DB TEXT
                    query with TEXT for objects
-   fulltext search -candidates [-grams | -d D | -gx | -sep | -n | -partial] DB TERMS
+                   -f forces the search to continue even if files are missing or out of date
+   microfts search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f] DB TERMS
                    find all candidates with the grams for TERMS
                    -grams indicates TERMS are grams, otherwise extract grams from TERMS
-   fulltext data [-nx | -dx] DB GROUP
+   microfts data [-nx | -dx] DB GROUP
                    get data for each doc in GROUP
+   microfts update [-t] DB
+                   reinput files that have changed
+                   delete files that have been removed
+                   -t means do a test run, printing what would have happened
 
-   fulltext is targeted for groups of small documents, like lines in a file.
+   microfts is targeted for groups of small documents, like lines in a file.
 
+  -     read from stdin instead of a file named GROUP
   -candidates
-    	return docs with grams for search
+        return docs with grams for search
   -comp string
-    	compression type to use when creating a database
+        compression type to use when creating a database
   -d string
-    	delimiter for unicode tags (default ",")
+        delimiter for unicode tags (default ",")
   -data string
-    	data to define for object
+        data to define for object
   -dx
-    	use hex instead of unicode for object data
-  -file
-    	GROUP is the path to the input file
+        use hex instead of unicode for object data
+  -f    search: continue even if files are changed or missing
   -grams
-    	get: specify tags for intead of text
-    	info: print gram coverage
-    	search: specify grams instead of search terms
+        get: specify tags for intead of text
+        info: print gram coverage
+        search: specify grams instead of search terms
   -gx
-    	use hex instead of unicode for grams
-  -n	only print line numbers for search
+        use hex instead of unicode for grams
+  -n    only print line numbers for search
   -org
-    	index org-mode chunks instead of lines
+        index org-mode chunks instead of lines
   -partial
-    	search: allow partial matches in search
+        search: allow partial matches in search
   -s int
-    	gram size
+        gram size
   -sep
-    	print candidates on separate lines
-  -v	verbose
+        print candidates on separate lines
+  -t    update: do a test run, printing what would have happened
+  -v    verbose
 #+end_example
 * Notes
 ** Grams

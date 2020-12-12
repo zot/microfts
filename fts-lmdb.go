@@ -121,6 +121,7 @@ type lmdbConfigStruct struct {
 	dataString  string
 	grams       bool
 	groups      bool
+	chunks      bool
 	candidates  bool
 	separate    bool
 	numbers     bool
@@ -183,41 +184,24 @@ func (cfg *lmdbConfigStruct) open(write bool) {
 }
 
 func cmdInfo(cfg *lmdbConfigStruct) {
+	if len(cfg.args) > 1 {
+		fmt.Fprintf(os.Stderr, "Too many arguments: %s\n", strings.Join(os.Args[1:], " "))
+		usage()
+	}
 	cfg.open(false)
 	defer cfg.env.Close()
 	cfg.view(func() {
 		if len(cfg.args) == 0 {
 			if cfg.groups {
 				cfg.iterate(cfg.groupNameDb, func(cur *lmdb.Cursor, k []byte, v []byte) {
-					group := cfg.getGroupWithGidBytes(v)
-					fmt.Printf("%s", group.groupName)
-					if group.org {
-						fmt.Print(" org-mode")
-					}
-					stat, err := os.Stat(group.groupName)
-					if os.IsNotExist(err) {
-						fmt.Print(" DELETED")
-					} else if err != nil {
-						fmt.Print(" NOT AVAILABLE")
-					} else if stat.ModTime().After(group.lastChanged) {
-						fmt.Print(" CHANGED")
-					}
-					fmt.Println()
+					printGroupInfo(cfg.getGroupWithGidBytes(v))
 				})
 				return
 			}
-			stat, err := cfg.txn.Stat(cfg.groupDb)
-			check(err)
-			groups := int(stat.Entries)
-			stat, err = cfg.txn.Stat(cfg.groupNameDb)
-			check(err)
-			groupNames := stat.Entries
-			stat, err = cfg.txn.Stat(cfg.chunkDb)
-			check(err)
-			chunks := float64(stat.Entries)
-			stat, err = cfg.txn.Stat(cfg.gramDb)
-			check(err)
-			gramTot := stat.Entries
+			groups := int(cfg.stat(cfg.groupDb).Entries)
+			groupNames := cfg.stat(cfg.groupNameDb).Entries
+			chunks := float64(cfg.stat(cfg.chunkDb).Entries)
+			gramTot := cfg.stat(cfg.gramDb).Entries
 			gramTot--
 			staleGroups := map[string]string{}
 			staleGroupNames := []string{}
@@ -347,12 +331,81 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 			if group == nil {
 				exitError(fmt.Sprintf("NO GROUP %s\n", cfg.groupName()))
 			}
-
+			if !printGroupInfo(group) {return}
+			if cfg.chunks {
+				contents, err := ioutil.ReadFile(group.groupName)
+				if err != nil {
+					exitError(fmt.Sprintf("Could not read file: %s", group.groupName))
+				}
+				str := string(contents)
+				if cfg.sexp {
+					fmt.Print("(")
+				}
+				if group.org {
+					forParts(str, func(line, typ, start, end int) {
+						if cfg.sexp {
+							fmt.Printf(" (%d %d \"%s\")", line, start, escape(str[start:end]))
+						} else {
+							fmt.Printf("%d:%s\n", line, str[start:end])
+						}
+					})
+				} else {
+					input := bufio.NewReader(strings.NewReader(str))
+					pos := 0
+					for lineNo := 1; ; lineNo++ {
+						line, err := readLine(input)
+						lineLen := len(line)
+						if lineLen > 0 && line[lineLen-1] == '\n' {
+							line = line[:lineLen-1]
+						}
+						if err == io.EOF {break}
+						if cfg.sexp {
+							fmt.Printf(" (%d %d \"%s\")", lineNo, pos, escape(line))
+						} else {
+							fmt.Printf("%d:%s\n", lineNo, line)
+						}
+						pos += lineLen
+					}
+				}
+				if cfg.sexp {
+					fmt.Print(" )")
+				}
+			}
 		}
 	})
 }
 
+func printGroupInfo(group *groupStruct) bool {
+	valid := false
+	fmt.Printf("%s", group.groupName)
+	if group.org {
+		fmt.Print(" org-mode")
+	}
+	stat, err := os.Stat(group.groupName)
+	if os.IsNotExist(err) {
+		fmt.Print(" DELETED")
+	} else if err != nil {
+		fmt.Print(" NOT AVAILABLE")
+	} else if stat.ModTime().After(group.lastChanged) {
+		fmt.Print(" CHANGED")
+	} else {
+		valid = true
+	}
+	fmt.Println()
+	return valid
+}
+
+func (cfg *lmdbConfigStruct) stat(db lmdb.DBI) *lmdb.Stat {
+	stat, err := cfg.txn.Stat(db)
+	check(err)
+	return stat
+}
+
 func cmdCreate(cfg *lmdbConfigStruct) {
+	if len(cfg.args) != 0 {
+		fmt.Fprintf(os.Stderr, "Too many arguments: %s\n", strings.Join(os.Args[1:], " "))
+		usage()
+	}
 	cfg.open(true)
 	defer cfg.env.Close()
 	cfg.env.Update(func(txn *lmdb.Txn) error {
@@ -369,6 +422,7 @@ func (cfg *lmdbConfigStruct) groupName() string {
 
 func cmdChunk(cfg *lmdbConfigStruct) {
 	if len(cfg.args) != 2 {
+		fmt.Fprintf(os.Stderr, "Wrong number of arguments: %s\n", strings.Join(os.Args[1:], " "))
 		usage()
 	}
 	cfg.open(true)
@@ -401,6 +455,7 @@ func cmdChunk(cfg *lmdbConfigStruct) {
 
 func cmdInput(cfg *lmdbConfigStruct) {
 	if len(cfg.args) == 0 { // DATABASE and at least one GROUP
+		fmt.Fprintf(os.Stderr, "Too many arguments: %s\n", strings.Join(os.Args[1:], " "))
 		usage()
 	}
 	cfg.open(true)
@@ -741,6 +796,7 @@ func (cfg *lmdbConfigStruct) getNewOid() []byte {
 
 func cmdGrams(cfg *lmdbConfigStruct) {
 	if len(cfg.args) != 0 {
+		fmt.Fprintf(os.Stderr, "Too many arguments: %s\n", strings.Join(os.Args[1:], " "))
 		usage()
 	}
 	first := true
@@ -764,6 +820,7 @@ func cmdGrams(cfg *lmdbConfigStruct) {
 
 func cmdDelete(cfg *lmdbConfigStruct) {
 	if len(cfg.args) != 1 {
+		fmt.Fprintf(os.Stderr, "Wrong number of arguments: %s\n", strings.Join(os.Args[1:], " "))
 		usage()
 	}
 	cfg.open(true)
@@ -789,6 +846,7 @@ func (cfg *lmdbConfigStruct) iterate(dbi lmdb.DBI, code func(cur *lmdb.Cursor, k
 
 func cmdCompact(cfg *lmdbConfigStruct) {
 	if len(cfg.args) != 0 {
+		fmt.Fprintf(os.Stderr, "Too many arguments: %s\n", strings.Join(os.Args[1:], " "))
 		usage()
 	}
 	cfg.open(true)
@@ -856,6 +914,7 @@ func cmdCompact(cfg *lmdbConfigStruct) {
 
 func cmdUpdate(cfg *lmdbConfigStruct) {
 	if len(cfg.args) != 0 {
+		fmt.Fprintf(os.Stderr, "Too many arguments: %s\n", strings.Join(os.Args[1:], " "))
 		usage()
 	}
 	cfg.open(true)
@@ -896,6 +955,7 @@ func cmdUpdate(cfg *lmdbConfigStruct) {
 
 func cmdEmpty(cfg *lmdbConfigStruct) {
 	if len(cfg.args) == 0 {
+		fmt.Fprintf(os.Stderr, "Not enough arguments: %s\n", strings.Join(os.Args[1:], " "))
 		usage()
 	}
 	cfg.open(true)

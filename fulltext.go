@@ -285,6 +285,7 @@ func main() {
 	flag.BoolVar(&lmdbConfig.test, "t", false, "update: do a test run, printing what would have happened")
 	flag.StringVar(&lmdbConfig.compression, "comp", "", "compression type to use when creating a database")
 	flag.BoolVar(&lmdbConfig.groups, "groups", false, "info: display information for each group")
+	flag.BoolVar(&lmdbConfig.chunks, "chunks", false, "info DB GROUP: display all of a group's chunks")
 	flag.BoolVar(&lmdbConfig.grams, "grams", false, "get: specify tags for intead of text\n"+
 		"info: print gram coverage\n"+
 		"search: specify grams instead of search terms")
@@ -312,8 +313,9 @@ func printUsage() {
                    print information about each group in the database,
                    whether it is missing or changed
                    whether it is an org-mode entry
-   `+prog+` info DB GROUP
+   `+prog+` info [-chunks] DB GROUP
                    print info for a GROUP
+                   -chunks also prints the chunks in GROUP
    `+prog+` info [-grams] DB
                    print info for database
                    displays any groups which do not exist as files

@@ -59,8 +59,9 @@ Usage:
                    print information about each group in the database,
                    whether it is missing or changed
                    whether it is an org-mode entry
-   microfts info DB GROUP
+   microfts info [-chunks] DB GROUP
                    print info for a GROUP
+                   -chunks also prints the chunks in GROUP
    microfts info [-grams] DB
                    print info for database
                    displays any groups which do not exist as files
@@ -103,6 +104,8 @@ Usage:
 
   -candidates
         return docs with grams for search
+  -chunks
+        info DB GROUP: display all of a group's chunks
   -comp string
         compression type to use when creating a database
   -d string

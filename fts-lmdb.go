@@ -122,6 +122,7 @@ type lmdbConfigStruct struct {
 	separate    bool
 	numbers     bool
 	compression string
+	force       bool
 }
 
 var lmdbConfig lmdbConfigStruct
@@ -861,15 +862,32 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			}
 		}
 	} else {
+		badFiles := map[string]string{}
+		bad := func(msg string, group string) {
+			delete(hits, gids[group])
+			delete(gids, group)
+			delete(groupStructs, group)
+			badFiles[group] = fmt.Sprintf(msg, group)
+		}
 		for _, group := range groups {
 			stat, err := os.Stat(group)
-			if err != nil {
+			if err != nil && cfg.force {
+				bad("Skipping '%s' because it is missing", group)
+			} else if err != nil {
 				exitError("Could not read file " + group)
 			} else if stat.ModTime().After(groupStructs[group].lastChanged) {
-				exitError(fmt.Sprintf("File has changed since indexing: %s", group))
+				if cfg.force {
+					bad("Skipping '%s' because it has changed", group)
+				} else {
+					exitError(fmt.Sprintf("File has changed since indexing: %s", group))
+				}
 			}
 		}
 		for _, group := range groups {
+			if msg, isBad := badFiles[group]; isBad {
+				fmt.Fprintln(os.Stderr, msg)
+				continue
+			}
 			var chunkStarts []int
 			lineNos := make(map[uint64]uint64)
 			chunkEnds := make(map[uint64]uint64)

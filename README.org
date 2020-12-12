@@ -4,12 +4,54 @@ space.  Initial tests seem to indicate that the database takes about
 twice as much space as the files it indexes.
 
 Microfts uses [[http://www.lmdb.tech/doc/index.html][LMDB]] for its database and [[https://github.com/AskAlexSharov/lmdb-go/lmdb][AskAlexSharov's fork]] of
-[[https://github.com/bmatsuo/lmdb-goto][bmatsuo's Go package]] to connect to it.
+[[https://github.com/bmatsuo/lmdb-goto][bmatsuo's lmdb-go package]] to connect to it.
 
 * LICENSE
 
 Microfts is MIT licensed, (c) 2020 Bill Burdick. All rights reserved.
 
+* Building
+Note that building may generate warning messages from lmdb-go's compilation of the LMDB C code.
+#+begin_src sh
+go build -o microfts
+#+end_src
+
+* Examples
+** Creating a database
+#+begin_src sh
+./microfts create /tmp/bubba
+#+end_src
+** Adding Text
+This adds /tmp/tst to the database in /tmp/bubba
+#+begin_src sh
+rm -rf /tmp/bubba
+./microfts create /tmp/bubba
+cat > /tmp/tst <<here
+one
+two three
+four
+four five
+one two three
+one three two
+here
+./microfts input -file /tmp/bubba /tmp/tst
+#+end_src
+** Getting Info
+#+begin_src sh
+./microfts info /tmp/bubba
+#+end_src
+** Searching
+#+begin_src sh
+./microfts search /tmp/bubba "one two"
+#+end_src
+** Deleting a file's information
+#+begin_src sh
+./microfts delete /tmp/bubba /tmp/tst
+#+end_src
+** Reclaiming space in the database (only really matters after deleting a large file)
+#+begin_src sh
+./microfts compact /tmp/bubba
+#+end_src
 * Usage
 #+begin_example
 Usage:

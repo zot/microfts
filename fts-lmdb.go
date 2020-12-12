@@ -373,6 +373,19 @@ func cmdInput(cfg *lmdbConfigStruct) {
 	}
 }
 
+func (cfg *lmdbConfigStruct) openInputFile(date time.Time) bool {
+	if cfg.file {
+		_, grp := cfg.getGroup(cfg.groupName())
+		if grp != nil && grp.lastChanged.Equal(date) {return false}
+		input, err := os.OpenFile(cfg.groupName(), os.O_RDONLY, 0)
+		check(err)
+		cfg.input = bufio.NewReader(input)
+	} else {
+		cfg.input = bufio.NewReader(os.Stdin)
+	}
+	return true
+}
+
 func (cfg *lmdbConfigStruct) indexOrg(date time.Time) {
 	contents, err := ioutil.ReadAll(cfg.input)
 	check(err)
@@ -380,6 +393,7 @@ func (cfg *lmdbConfigStruct) indexOrg(date time.Time) {
 	cfg.open(true)
 	defer cfg.env.Close()
 	cfg.update(func() {
+		if !cfg.openInputFile(date) {return}
 		_, grp := cfg.getGroup(cfg.groupName())
 		if grp != nil && grp.lastChanged.Equal(date) {return}
 		cfg.deleteGroup()
@@ -403,18 +417,10 @@ func (cfg *lmdbConfigStruct) indexOrg(date time.Time) {
 }
 
 func (cfg *lmdbConfigStruct) indexLines(date time.Time) {
-	if cfg.file {
-		_, grp := cfg.getGroup(cfg.groupName())
-		if grp.lastChanged.Equal(date) {return}
-		input, err := os.OpenFile(cfg.groupName(), os.O_RDONLY, 0)
-		check(err)
-		cfg.input = bufio.NewReader(input)
-	} else {
-		cfg.input = bufio.NewReader(os.Stdin)
-	}
 	cfg.open(true)
 	defer cfg.env.Close()
 	cfg.update(func() {
+		if !cfg.openInputFile(date) {return}
 		cfg.deleteGroup()
 		pos := 0
 		for lineNo := 1; ; lineNo++ {

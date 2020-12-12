@@ -55,10 +55,17 @@ here
 * Usage
 #+begin_example
 Usage:
-   microfts info [-dx | -nx | -grams | -gx] DB [GROUP]
-                   print info for database or GROUP
+   microfts info -groups DB
+                   print information about each group in the database,
+                   whether it is missing or changed
+                   whether it is an org-mode entry
+   microfts info DB GROUP
+                   print info for a GROUP
+   microfts info [-grams] DB
+                   print info for database
                    displays any groups which do not exist as files
                    displays any groups which refer to files that have changed
+                   -grams displays distribution information about the trigram index
    microfts create [-s GRAMSIZE] DB
                    create DATABASE if it does not exist
    microfts chunk [-nx | -data D | -dx] -d DELIM DB GROUP GRAMS
@@ -109,6 +116,8 @@ Usage:
         get: specify tags for intead of text
         info: print gram coverage
         search: specify grams instead of search terms
+  -groups
+        info: display information for each group
   -gx
         use hex instead of unicode for grams
   -n    only print line numbers for search
@@ -121,7 +130,7 @@ Usage:
   -sep
         print candidates on separate lines
   -sexp
-        search: output matches as s-expressions
+        search: output matches as an s-expression ((file (line offset chunk) ... ) ... )
   -t    update: do a test run, printing what would have happened
   -v    verbose
 #+end_example
@@ -189,5 +198,6 @@ GIDS are compressed integers
 | oid count                         |
 | last changed timestamp            |
 | validity (valid = 0, deleted = 1) |
+| org -- whether -org was used      |
 |-----------------------------------|
 *** Group Names: NAME->GID

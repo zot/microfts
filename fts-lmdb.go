@@ -76,6 +76,7 @@ type groupStruct struct {
 	oidCount    uint64
 	lastChanged time.Time
 	validity    byte
+	org         bool
 }
 
 type myBuf struct {
@@ -118,6 +119,7 @@ type lmdbConfigStruct struct {
 	dataHex     bool
 	dataString  string
 	grams       bool
+	groups      bool
 	candidates  bool
 	separate    bool
 	numbers     bool
@@ -184,6 +186,25 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 	defer cfg.env.Close()
 	cfg.view(func() {
 		if len(cfg.args) == 0 {
+			if cfg.groups {
+				cfg.iterate(cfg.groupNameDb, func(cur *lmdb.Cursor, k []byte, v []byte) {
+					group := cfg.getGroupWithGidBytes(v)
+					fmt.Printf("%s", group.groupName)
+					if group.org {
+						fmt.Print(" org-mode")
+					}
+					stat, err := os.Stat(group.groupName)
+					if os.IsNotExist(err) {
+						fmt.Print(" DELETED")
+					} else if err != nil {
+						fmt.Print(" NOT AVAILABLE")
+					} else if stat.ModTime().After(group.lastChanged) {
+						fmt.Print(" CHANGED")
+					}
+					fmt.Println()
+				})
+				return
+			}
 			stat, err := cfg.txn.Stat(cfg.groupDb)
 			check(err)
 			groups := int(stat.Entries)
@@ -841,6 +862,7 @@ func cmdUpdate(cfg *lmdbConfigStruct) {
 	cfg.update(func() {
 		deleteGroups := map[string]struct{}{}
 		updateGroups := map[string]struct{}{}
+		groupOrg := map[string]bool{}
 		cfg.iterate(cfg.groupDb, func(cur *lmdb.Cursor, k, v []byte) {
 			group := decodeGroup(v)
 			stat, err := os.Stat(group.groupName)
@@ -848,6 +870,7 @@ func cmdUpdate(cfg *lmdbConfigStruct) {
 				deleteGroups[group.groupName] = member
 			} else if stat.ModTime().After(group.lastChanged) {
 				updateGroups[group.groupName] = member
+				groupOrg[group.groupName] = group.org
 			}
 		})
 		for group := range deleteGroups {
@@ -862,6 +885,7 @@ func cmdUpdate(cfg *lmdbConfigStruct) {
 				fmt.Printf("Input '%s' because it has changed", group)
 			} else {
 				cfg.args = []string{group}
+				cfg.org = groupOrg[group]
 				cfg.index(group)
 				cfg.storeDirtyGroup()
 			}
@@ -1002,10 +1026,11 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		eachChunk:
 			for _, st := range chunkStarts {
 				start := uint64(st)
-				chunk := strings.ToLower(string(contents[start:chunkEnds[start]]))
+				chunk := string(contents[start:chunkEnds[start]])
+				chunkCmp := strings.ToLower(string(contents[start:chunkEnds[start]]))
 			args:
 				for _, arg := range cfg.args {
-					testChunk := chunk
+					testChunk := chunkCmp
 					for len(testChunk) > 0 {
 						i := strings.Index(testChunk, strings.ToLower(arg))
 						if i == -1 {break}
@@ -1022,8 +1047,8 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				} else if cfg.numbers {
 					out = fmt.Sprintf("%s %d", out, lineNos[start])
 				} else {
-					if chunk != "" && chunk[len(chunk)-1] == '\n' {
-						chunk = chunk[:len(chunk)-1]
+					if chunkCmp != "" && chunkCmp[len(chunkCmp)-1] == '\n' {
+						chunkCmp = chunkCmp[:len(chunkCmp)-1]
 					}
 					fmt.Printf("%s:%d:%s\n", group, lineNos[start], chunk)
 				}
@@ -1119,8 +1144,9 @@ func decodeGroup(bytes []byte) *groupStruct {
 	group.oidCount = oidCount
 	group.validity = bytes[0]
 	lastModSec, bytes := getNumOrPanic(bytes[1:])
-	lastModNanos, _ := getNumOrPanic(bytes)
+	lastModNanos, bytes := getNumOrPanic(bytes)
 	group.lastChanged = time.Unix(int64(lastModSec), int64(lastModNanos))
+	group.org = bytes[0] == 1
 	return group
 }
 
@@ -1131,6 +1157,11 @@ func (cfg *lmdbConfigStruct) putGroup(gid uint64, grp *groupStruct) {
 	buf.next(1)[0] = grp.validity
 	buf.putNum(uint64(grp.lastChanged.Unix()))
 	buf.putNum(uint64(grp.lastChanged.Nanosecond()))
+	if grp.org {
+		buf.next(1)[0] = 1
+	} else {
+		buf.next(1)[0] = 0
+	}
 	cfg.put(cfg.groupDb, cfg.numBytes(gid), buf.bytes)
 }
 
@@ -1146,6 +1177,7 @@ func (cfg *lmdbConfigStruct) createGroup() (gid uint64, group *groupStruct) {
 	}
 	group = new(groupStruct)
 	group.groupName = cfg.groupName()
+	group.org = cfg.org
 	cfg.dirtyGroupGid = gid
 	cfg.dirtyGroup = group
 	cfg.dirtyName = true

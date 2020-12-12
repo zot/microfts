@@ -992,12 +992,12 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		eachChunk:
 			for _, st := range chunkStarts {
 				start := uint64(st)
-				chunk := string(contents[start:chunkEnds[start]])
+				chunk := strings.ToLower(string(contents[start:chunkEnds[start]]))
 			args:
 				for _, arg := range cfg.args {
 					testChunk := chunk
 					for len(testChunk) > 0 {
-						i := strings.Index(testChunk, arg)
+						i := strings.Index(testChunk, strings.ToLower(arg))
 						if i == -1 {break}
 						if cfg.partial || ((i == 0 || !isGramChar(testChunk[i-1])) &&
 							(i+len(arg) == len(testChunk) || !isGramChar(testChunk[i+len(arg)]))) {

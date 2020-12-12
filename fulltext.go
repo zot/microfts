@@ -274,7 +274,6 @@ func main() {
 	flag.BoolVar(&lmdbConfig.gramHex, "gx", false, "use hex instead of unicode for grams")
 	flag.BoolVar(&lmdbConfig.dataHex, "dx", false, "use hex instead of unicode for object data")
 	flag.StringVar(&lmdbConfig.dataString, "data", "", "data to define for object")
-	flag.BoolVar(&lmdbConfig.stdin, "", false, "read from stdin instead of a file named GROUP")
 	flag.BoolVar(&lmdbConfig.candidates, "candidates", false, "return docs with grams for search")
 	flag.BoolVar(&lmdbConfig.separate, "sep", false, "print candidates on separate lines")
 	flag.BoolVar(&lmdbConfig.numbers, "n", false, "only print line numbers for search")
@@ -319,10 +318,10 @@ func printUsage() {
                    -gx means GRAMS is hex encoded with two bytes for each gram using base 37.
    `+prog+` grams [-gx] CHUNK
                    output grams for CHUNK
-   `+prog+` input [-nx | -dx | -] DB GROUP...
-                   Create GROUP and add a CHUNK for each line of input.
-                   Chunk data is the number, offset, and length for each line (starting at 1).
-                   - means to read from stdin, otherwise GROUP is the name of the input file
+   `+prog+` input [-nx | -dx | -org] DB FILE...
+                   Create named FILE and add a CHUNK for each chunk of input.
+                   Chunk data is the line number, offset, and length for each chunk (starting at 1).
+                   -org means chunks are org elements, otherwise chunks are lines
    `+prog+` delete [-nx] DB GROUP
                    delete GROUP, its chunks, and tag entries.
                    NOTE: THIS DOES NOT RECLAIM SPACE! USE COMPACT FOR THAT

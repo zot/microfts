@@ -117,7 +117,6 @@ type lmdbConfigStruct struct {
 	dataHex     bool
 	dataString  string
 	grams       bool
-	stdin       bool
 	candidates  bool
 	separate    bool
 	numbers     bool
@@ -385,28 +384,22 @@ func cmdInput(cfg *lmdbConfigStruct) {
 	defer cfg.env.Close()
 	cfg.update(func() {
 		for len(cfg.args) > 0 {
-			cfg.index(cfg.args[0], cfg.stdin)
+			cfg.index(cfg.args[0])
 			cfg.storeDirtyGroup()
-			if cfg.stdin {break}
 			cfg.args = cfg.args[1:]
 		}
 	})
 }
 
-func (cfg *lmdbConfigStruct) index(group string, stdin bool) {
-	cfg.stdin = stdin
+func (cfg *lmdbConfigStruct) index(group string) {
 	if cfg.org {
-		cfg.indexOrg(group, stdin)
+		cfg.indexOrg(group)
 	} else {
-		cfg.indexLines(group, stdin)
+		cfg.indexLines(group)
 	}
 }
 
-func (cfg *lmdbConfigStruct) openInputFile(group string, stdin bool) (bool, time.Time) {
-	if stdin {
-		cfg.input = bufio.NewReader(os.Stdin)
-		return true, time.Now()
-	}
+func (cfg *lmdbConfigStruct) openInputFile(group string) (bool, time.Time) {
 	stat, err := os.Stat(group)
 	check(err)
 	date := stat.ModTime()
@@ -419,11 +412,11 @@ func (cfg *lmdbConfigStruct) openInputFile(group string, stdin bool) (bool, time
 	return true, date
 }
 
-func (cfg *lmdbConfigStruct) indexOrg(group string, stdin bool) {
+func (cfg *lmdbConfigStruct) indexOrg(group string) {
 	contents, err := ioutil.ReadAll(cfg.input)
 	check(err)
 	str := string(contents)
-	open, date := cfg.openInputFile(group, stdin)
+	open, date := cfg.openInputFile(group)
 	if !open {return}
 	_, grp := cfg.getGroup(group)
 	if grp != nil && grp.lastChanged.Equal(date) {return}
@@ -445,8 +438,8 @@ func (cfg *lmdbConfigStruct) indexOrg(group string, stdin bool) {
 	grp.lastChanged = date
 }
 
-func (cfg *lmdbConfigStruct) indexLines(group string, stdin bool) {
-	open, date := cfg.openInputFile(group, stdin)
+func (cfg *lmdbConfigStruct) indexLines(group string) {
+	open, date := cfg.openInputFile(group)
 	if !open {return}
 	pos := 0
 	for lineNo := 1; ; lineNo++ {
@@ -870,7 +863,7 @@ func cmdUpdate(cfg *lmdbConfigStruct) {
 				fmt.Printf("Input '%s' because it has changed", group)
 			} else {
 				cfg.args = []string{group}
-				cfg.index(group, false)
+				cfg.index(group)
 				if cfg.dirtyGroup != nil {
 					cfg.putGroup(cfg.dirtyGroupGid, cfg.dirtyGroup)
 				}

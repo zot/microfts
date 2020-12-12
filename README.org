@@ -54,6 +54,11 @@ here
 #+end_src
 * Usage
 #+begin_example
+Deleted chunks: 7
+Grams:          25
+
+bill/work/microfts on  main [!?] via 🐹 v1.14.4
+❯ ./microfts --help
 Usage:
    microfts info [-dx | -nx | -grams | -gx] DB [GROUP]
                    print info for database or GROUP
@@ -68,10 +73,10 @@ Usage:
                    -gx means GRAMS is hex encoded with two bytes for each gram using base 37.
    microfts grams [-gx] CHUNK
                    output grams for CHUNK
-   microfts input [-nx | -dx | -] DB GROUP...
-                   Create GROUP and add a CHUNK for each line of input.
-                   Chunk data is the number, offset, and length for each line (starting at 1).
-                   - means to read from stdin, otherwise GROUP is the name of the input file
+   microfts input [-nx | -dx | -org] DB FILE...
+                   Create named FILE and add a CHUNK for each chunk of input.
+                   Chunk data is the line number, offset, and length for each chunk (starting at 1).
+                   -org means chunks are org elements, otherwise chunks are lines
    microfts delete [-nx] DB GROUP
                    delete GROUP, its chunks, and tag entries.
                    NOTE: THIS DOES NOT RECLAIM SPACE! USE COMPACT FOR THAT
@@ -92,7 +97,6 @@ Usage:
 
    microfts is targeted for groups of small documents, like lines in a file.
 
-  -     read from stdin instead of a file named GROUP
   -candidates
         return docs with grams for search
   -comp string

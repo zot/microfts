@@ -68,7 +68,7 @@ Usage:
                    -gx means GRAMS is hex encoded with two bytes for each gram using base 37.
    microfts grams [-gx] CHUNK
                    output grams for CHUNK
-   microfts input [-nx | -dx | -] DB GROUP
+   microfts input [-nx | -dx | -] DB GROUP...
                    Create GROUP and add a CHUNK for each line of input.
                    Chunk data is the number, offset, and length for each line (starting at 1).
                    - means to read from stdin, otherwise GROUP is the name of the input file

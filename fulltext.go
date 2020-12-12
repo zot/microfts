@@ -319,7 +319,7 @@ func printUsage() {
    `+prog+` grams [-gx] CHUNK
                    output grams for CHUNK
    `+prog+` input [-nx | -dx | -org] DB FILE...
-                   Create named FILE and add a CHUNK for each chunk of input.
+                   For each FILE, create a group with its name and add a CHUNK for each chunk of input.
                    Chunk data is the line number, offset, and length for each chunk (starting at 1).
                    -org means chunks are org elements, otherwise chunks are lines
    `+prog+` delete [-nx] DB GROUP
@@ -339,6 +339,8 @@ func printUsage() {
                    reinput files that have changed
                    delete files that have been removed
                    -t means do a test run, printing what would have happened
+   `+prog+` empty DB GROUP...
+                   Create empty GROUPs, ignoring existing ones
 
    `+prog+` is targeted for groups of small documents, like lines in a file.
 

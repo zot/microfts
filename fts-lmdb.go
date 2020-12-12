@@ -864,10 +864,25 @@ func cmdUpdate(cfg *lmdbConfigStruct) {
 			} else {
 				cfg.args = []string{group}
 				cfg.index(group)
-				if cfg.dirtyGroup != nil {
-					cfg.putGroup(cfg.dirtyGroupGid, cfg.dirtyGroup)
-				}
+				cfg.storeDirtyGroup()
 			}
+		}
+	})
+}
+
+func cmdEmpty(cfg *lmdbConfigStruct) {
+	if len(cfg.args) == 0 {
+		usage()
+	}
+	cfg.open(true)
+	cfg.update(func() {
+		for len(cfg.args) > 0 {
+			_, grp := cfg.getGroup(cfg.groupName())
+			if grp == nil {
+				cfg.createGroup()
+				cfg.storeDirtyGroup()
+			}
+			cfg.args = cfg.args[1:]
 		}
 	})
 }
@@ -1277,4 +1292,5 @@ var cmds = map[string]func(*lmdbConfigStruct){
 	"info":    cmdInfo,
 	"compact": cmdCompact,
 	"update":  cmdUpdate,
+	"empty":   cmdEmpty,
 }

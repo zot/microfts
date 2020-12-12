@@ -54,11 +54,6 @@ here
 #+end_src
 * Usage
 #+begin_example
-Deleted chunks: 7
-Grams:          25
-
-bill/work/microfts on  main [!?] via 🐹 v1.14.4
-❯ ./microfts --help
 Usage:
    microfts info [-dx | -nx | -grams | -gx] DB [GROUP]
                    print info for database or GROUP
@@ -74,7 +69,7 @@ Usage:
    microfts grams [-gx] CHUNK
                    output grams for CHUNK
    microfts input [-nx | -dx | -org] DB FILE...
-                   Create named FILE and add a CHUNK for each chunk of input.
+                   For each FILE, create a group with its name and add a CHUNK for each chunk of input.
                    Chunk data is the line number, offset, and length for each chunk (starting at 1).
                    -org means chunks are org elements, otherwise chunks are lines
    microfts delete [-nx] DB GROUP
@@ -94,6 +89,8 @@ Usage:
                    reinput files that have changed
                    delete files that have been removed
                    -t means do a test run, printing what would have happened
+   microfts empty DB GROUP...
+                   Create empty GROUPs, ignoring existing ones
 
    microfts is targeted for groups of small documents, like lines in a file.
 

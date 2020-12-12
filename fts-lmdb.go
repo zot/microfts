@@ -111,6 +111,7 @@ type lmdbConfigStruct struct {
 	freeGids []byte // compressed oids
 	//options
 	partial     bool
+	limit       int
 	org         bool
 	sexp        bool
 	gramSize    int
@@ -946,12 +947,15 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 	if cfg.sexp {
 		fmt.Print("(")
 	}
+	results := 0
 	if cfg.candidates {
 		for _, grpNm := range groups {
 			if _, deleted := deletedGroups[gids[grpNm]]; deleted {continue}
 			var grams []string
 			for _, data := range hits[gids[grpNm]] {
 				grams = append(grams, string(data))
+				results++
+				if results >= cfg.limit {break}
 			}
 			sort.Strings(grams)
 			if cfg.sexp {
@@ -971,6 +975,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				}
 				fmt.Println()
 			}
+			if results >= cfg.limit {break}
 		}
 	} else {
 		badFiles := map[string]string{}
@@ -1052,12 +1057,15 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 					}
 					fmt.Printf("%s:%d:%s\n", group, lineNos[start], chunk)
 				}
+				results++
+				if results >= cfg.limit {break}
 			}
 			if cfg.sexp {
 				fmt.Print(")")
 			} else if cfg.numbers {
 				fmt.Println(out)
 			}
+			if results >= cfg.limit {break}
 		}
 	}
 	if cfg.sexp {

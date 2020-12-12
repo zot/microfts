@@ -277,6 +277,7 @@ func main() {
 	flag.BoolVar(&lmdbConfig.candidates, "candidates", false, "return docs with grams for search")
 	flag.BoolVar(&lmdbConfig.separate, "sep", false, "print candidates on separate lines")
 	flag.BoolVar(&lmdbConfig.numbers, "n", false, "only print line numbers for search")
+	flag.IntVar(&lmdbConfig.limit, "limit", maxInt, "search: limit the number of results")
 	flag.BoolVar(&lmdbConfig.org, "org", false, "index org-mode chunks instead of lines")
 	flag.BoolVar(&lmdbConfig.sexp, "sexp", false, "search: output matches as an s-expression ((file (line offset chunk) ... ) ... )")
 	flag.BoolVar(&lmdbConfig.partial, "partial", false, "search: allow partial matches in search")
@@ -336,10 +337,10 @@ func printUsage() {
                    NOTE: THIS DOES NOT RECLAIM SPACE! USE COMPACT FOR THAT
    `+prog+` compact DB
                    Reclaim space for deleted groups
-   `+prog+` search [-n | -partial | -f] DB TEXT
+   `+prog+` search [-n | -partial | -f | - limit N] DB TEXT
                    query with TEXT for objects
                    -f forces the search to continue even if files are missing or out of date
-   `+prog+` search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f] DB TERMS
+   `+prog+` search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f | -limit N] DB TERMS
                    find all candidates with the grams for TERMS
                    -grams indicates TERMS are grams, otherwise extract grams from TERMS
    `+prog+` data [-nx | -dx] DB GROUP

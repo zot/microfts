@@ -84,10 +84,10 @@ Usage:
                    NOTE: THIS DOES NOT RECLAIM SPACE! USE COMPACT FOR THAT
    microfts compact DB
                    Reclaim space for deleted groups
-   microfts search [-n | -partial | -f] DB TEXT
+   microfts search [-n | -partial | -f | - limit N] DB TEXT
                    query with TEXT for objects
                    -f forces the search to continue even if files are missing or out of date
-   microfts search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f] DB TERMS
+   microfts search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f | -limit N] DB TERMS
                    find all candidates with the grams for TERMS
                    -grams indicates TERMS are grams, otherwise extract grams from TERMS
    microfts data [-nx | -dx] DB GROUP
@@ -120,6 +120,8 @@ Usage:
         info: display information for each group
   -gx
         use hex instead of unicode for grams
+  -limit int
+        search: limit the number of results (default 9223372036854775807)
   -n    only print line numbers for search
   -org
         index org-mode chunks instead of lines

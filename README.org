@@ -61,7 +61,7 @@ Usage:
                    whether it is an org-mode entry
    microfts info [-chunks] DB GROUP
                    print info for a GROUP
-                   -chunks also prints the chunks in GROUP
+                   -chunks also prints the chunks in GROUP if it has a corresponding file
    microfts info [-grams] DB
                    print info for database
                    displays any groups which do not exist as files
@@ -85,9 +85,10 @@ Usage:
                    NOTE: THIS DOES NOT RECLAIM SPACE! USE COMPACT FOR THAT
    microfts compact DB
                    Reclaim space for deleted groups
-   microfts search [-n | -partial | -f | - limit N] DB TEXT
+   microfts search [-n | -partial | -f | - limit N | -filter REGEXP] DB TEXT
                    query with TEXT for objects
                    -f forces the search to continue even if files are missing or out of date
+                   -filter makes search only return chunks that match the REGEXP
    microfts search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f | -limit N] DB TERMS
                    find all candidates with the grams for TERMS
                    -grams indicates TERMS are grams, otherwise extract grams from TERMS
@@ -114,7 +115,7 @@ Usage:
         data to define for object
   -dx
         use hex instead of unicode for object data
-  -f    search: continue even if files are changed or missing
+  -f    search: skip changed and missing files instead of exiting
   -grams
         get: specify tags for intead of text
         info: print gram coverage

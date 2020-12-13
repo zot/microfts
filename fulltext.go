@@ -281,7 +281,7 @@ func main() {
 	flag.BoolVar(&lmdbConfig.org, "org", false, "index org-mode chunks instead of lines")
 	flag.BoolVar(&lmdbConfig.sexp, "sexp", false, "search: output matches as an s-expression ((file (line offset chunk) ... ) ... )")
 	flag.BoolVar(&lmdbConfig.partial, "partial", false, "search: allow partial matches in search")
-	flag.BoolVar(&lmdbConfig.force, "f", false, "search: continue even if files are changed or missing")
+	flag.BoolVar(&lmdbConfig.force, "f", false, "search: skip changed and missing files instead of exiting")
 	flag.BoolVar(&lmdbConfig.test, "t", false, "update: do a test run, printing what would have happened")
 	flag.StringVar(&lmdbConfig.compression, "comp", "", "compression type to use when creating a database")
 	flag.BoolVar(&lmdbConfig.groups, "groups", false, "info: display information for each group")
@@ -309,53 +309,54 @@ func printUsage() {
 	}
 	fmt.Fprintf(flag.CommandLine.Output(),
 		`Usage:
-   `+prog+` info -groups DB
+   %[1]s info -groups DB
                    print information about each group in the database,
                    whether it is missing or changed
                    whether it is an org-mode entry
-   `+prog+` info [-chunks] DB GROUP
+   %[1]s info [-chunks] DB GROUP
                    print info for a GROUP
-                   -chunks also prints the chunks in GROUP
-   `+prog+` info [-grams] DB
+                   -chunks also prints the chunks in GROUP if it has a corresponding file
+   %[1]s info [-grams] DB
                    print info for database
                    displays any groups which do not exist as files
                    displays any groups which refer to files that have changed
                    -grams displays distribution information about the trigram index
-   `+prog+` create [-s GRAMSIZE] DB
+   %[1]s create [-s GRAMSIZE] DB
                    create DATABASE if it does not exist
-   `+prog+` chunk [-nx | -data D | -dx] -d DELIM DB GROUP GRAMS
-   `+prog+` chunk [-nx | -data D | -dx] -gx DB GROUP GRAMS
+   %[1]s chunk [-nx | -data D | -dx] -d DELIM DB GROUP GRAMS
+   %[1]s chunk [-nx | -data D | -dx] -gx DB GROUP GRAMS
                    ADD a chunk to GROUP with GRAMS.
                    -d means use DELIM to split GRAMS.
                    -gx means GRAMS is hex encoded with two bytes for each gram using base 37.
-   `+prog+` grams [-gx] CHUNK
+   %[1]s grams [-gx] CHUNK
                    output grams for CHUNK
-   `+prog+` input [-nx | -dx | -org] DB FILE...
+   %[1]s input [-nx | -dx | -org] DB FILE...
                    For each FILE, create a group with its name and add a CHUNK for each chunk of input.
                    Chunk data is the line number, offset, and length for each chunk (starting at 1).
                    -org means chunks are org elements, otherwise chunks are lines
-   `+prog+` delete [-nx] DB GROUP
+   %[1]s delete [-nx] DB GROUP
                    delete GROUP, its chunks, and tag entries.
                    NOTE: THIS DOES NOT RECLAIM SPACE! USE COMPACT FOR THAT
-   `+prog+` compact DB
+   %[1]s compact DB
                    Reclaim space for deleted groups
-   `+prog+` search [-n | -partial | -f | - limit N] DB TEXT
+   %[1]s search [-n | -partial | -f | - limit N | -filter REGEXP] DB TEXT
                    query with TEXT for objects
                    -f forces the search to continue even if files are missing or out of date
-   `+prog+` search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f | -limit N] DB TERMS
+                   -filter makes search only return chunks that match the REGEXP
+   %[1]s search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f | -limit N] DB TERMS
                    find all candidates with the grams for TERMS
                    -grams indicates TERMS are grams, otherwise extract grams from TERMS
-   `+prog+` data [-nx | -dx] DB GROUP
+   %[1]s data [-nx | -dx] DB GROUP
                    get data for each doc in GROUP
-   `+prog+` update [-t] DB
+   %[1]s update [-t] DB
                    reinput files that have changed
                    delete files that have been removed
                    -t means do a test run, printing what would have happened
-   `+prog+` empty DB GROUP...
+   %[1]s empty DB GROUP...
                    Create empty GROUPs, ignoring existing ones
 
-   `+prog+` is targeted for groups of small documents, like lines in a file.
+   %[1]s is targeted for groups of small documents, like lines in a file.
 
-`)
+`, prog)
 	flag.PrintDefaults()
 }

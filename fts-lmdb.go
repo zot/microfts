@@ -1021,9 +1021,6 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		}
 	})
 	sort.Strings(groups)
-	if cfg.sexp {
-		fmt.Print("(")
-	}
 	results := 0
 	badFiles := map[string]string{}
 	bad := func(msg string, group string) {
@@ -1047,6 +1044,9 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			}
 		}
 	}
+	if cfg.sexp {
+		fmt.Print("(")
+	}
 	if cfg.candidates {
 		for _, grpNm := range groups {
 			if _, deleted := deletedGroups[gids[grpNm]]; deleted {continue}
@@ -1059,9 +1059,11 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				exitError(fmt.Sprintf("Could not read file: %s", grpNm))
 			}
 			str := string(contents)
+			runes := strings.NewReader(str)
+			runeOffset := 0
+			hexCount := int(0)
 			chunkStarts := []int{}
 			chunkResults := map[int]string{}
-			hexCount := int(0)
 			for _, data := range hits[gids[grpNm]] {
 				if cfg.dataHex {
 					chunkStarts = append(chunkStarts, int(hexCount))
@@ -1075,9 +1077,13 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 					lineNo, data := getNumOrPanic(data)
 					start, data := getNumOrPanic(data)
 					len, _ := getNumOrPanic(data)
+					for int(runes.Size())-runes.Len() < int(start) {
+						runeOffset++
+						runes.ReadRune()
+					}
 					chunkStarts = append(chunkStarts, int(start))
 					if cfg.sexp {
-						chunkResults[int(start)] = fmt.Sprintf(" (%d %d \"%s\")", lineNo, start, escape(str[start:start+len]))
+						chunkResults[int(start)] = fmt.Sprintf(" (%d %d \"%s\")", lineNo, runeOffset, escape(str[start:start+len]))
 					} else if cfg.numbers {
 						chunkResults[int(start)] = strconv.Itoa(int(lineNo))
 					} else {
@@ -1130,6 +1136,8 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			if err != nil {
 				exitError(fmt.Sprintf("Could not read file: %s", group))
 			}
+			runes := strings.NewReader(string(contents))
+			runeOffset := 0
 			out := ""
 			if cfg.sexp {
 				fmt.Printf("(\"%s\"", escape(group))
@@ -1157,8 +1165,12 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				if cfg.filter != "" {
 					if !reg.Match([]byte(chunk)) {continue}
 				}
+				for int(runes.Size())-runes.Len() < st {
+					runeOffset++
+					runes.ReadRune()
+				}
 				if cfg.sexp {
-					fmt.Printf(" (%d %d \"%s\")", lineNos[start], start, escape(chunk))
+					fmt.Printf(" (%d %d \"%s\")", lineNos[start], runeOffset, escape(chunk))
 				} else if cfg.numbers {
 					out = fmt.Sprintf("%s %d", out, lineNos[start])
 				} else {

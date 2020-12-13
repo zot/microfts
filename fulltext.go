@@ -341,7 +341,7 @@ func printUsage() {
                    Reclaim space for deleted groups
    %[1]s search [-n | -partial | -f | - limit N | -filter REGEXP] DB TEXT
                    query with TEXT for objects
-                   -f forces the search to continue even if files are missing or out of date
+                   -f force search to skip changed and missing files instead of exiting
                    -filter makes search only return chunks that match the REGEXP
    %[1]s search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f | -limit N] DB TERMS
                    find all candidates with the grams for TERMS

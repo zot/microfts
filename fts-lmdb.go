@@ -994,6 +994,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		}
 		for gid := range hits {
 			group := cfg.getGroupWithGid(gid)
+			if group.validity != valid {continue}
 			if group != nil && group.validity != deleted {
 				gids[group.groupName] = gid
 				groups = append(groups, group.groupName)

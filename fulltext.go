@@ -272,6 +272,7 @@ func main() {
 	flag.IntVar(&lmdbConfig.gramSize, "s", 0, "gram size")
 	flag.StringVar(&lmdbConfig.delimiter, "d", ",", "delimiter for unicode tags")
 	flag.BoolVar(&lmdbConfig.gramHex, "gx", false, "use hex instead of unicode for grams")
+	flag.BoolVar(&lmdbConfig.gramDec, "gd", false, "use decimal instead of unicode for grams")
 	flag.BoolVar(&lmdbConfig.dataHex, "dx", false, "use hex instead of unicode for object data")
 	flag.StringVar(&lmdbConfig.dataString, "data", "", "data to define for object")
 	flag.BoolVar(&lmdbConfig.candidates, "candidates", false, "return docs with grams for search")
@@ -345,9 +346,10 @@ func printUsage() {
                    -f force search to skip changed and missing files instead of exiting
                    -filter makes search only return chunks that match the REGEXP
                    REGEXP syntax is here: https://golang.org/pkg/regexp/syntax/
-   %[1]s search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f | -limit N] DB TERMS
-                   find all candidates with the grams for TERMS
+   %[1]s search -candidates [-grams | -gx | -gd | -n | -f | -limit N | -dx] DB TERM1 ...
+                   dispay all candidates with the grams for TERMS without filtering
                    -grams indicates TERMS are grams, otherwise extract grams from TERMS
+                   -gx: grams are in hex, -gd: grams are in decimal, otherwise they are 3-char strings
    %[1]s data [-nx | -dx] DB GROUP
                    get data for each doc in GROUP
    %[1]s update [-t] DB

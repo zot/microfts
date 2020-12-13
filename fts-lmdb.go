@@ -118,6 +118,7 @@ type lmdbConfigStruct struct {
 	gramSize    int
 	delimiter   string
 	gramHex     bool
+	gramDec     bool
 	dataHex     bool
 	dataString  string
 	grams       bool
@@ -714,12 +715,18 @@ func (cfg *lmdbConfigStruct) gramKeyForGram(gram gram) []byte {
 }
 
 func (cfg *lmdbConfigStruct) gramFor(str string) gram {
-	if !cfg.gramHex {return gramForUnicode(str)}
-	digit1, err := strconv.ParseInt(str[:2], 16, 8)
-	check(err)
-	digit2, err := strconv.ParseInt(str[2:4], 16, 8)
-	check(err)
-	return gram((digit1 << 8) | digit2)
+	if cfg.gramHex {
+		digit1, err := strconv.ParseInt(str[:2], 16, 8)
+		check(err)
+		digit2, err := strconv.ParseInt(str[2:4], 16, 8)
+		check(err)
+		return gram((digit1 << 8) | digit2)
+	} else if cfg.gramDec {
+		num, err := strconv.Atoi(str)
+		check(err)
+		return gram(num)
+	}
+	return gramForUnicode(str)
 }
 
 func (cfg *lmdbConfigStruct) oidKey(oid uint64) []byte {
@@ -809,8 +816,7 @@ func cmdGrams(cfg *lmdbConfigStruct) {
 			fmt.Print(" ")
 		}
 		if cfg.gramHex {
-			fmt.Printf("%s: %s%s",
-				cfg.db,
+			fmt.Printf("%s%s",
 				strconv.FormatUint(uint64(grm>>8), 16),
 				strconv.FormatUint(uint64(grm&0xFF), 16))
 		} else {
@@ -977,7 +983,15 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 	if len(cfg.args) == 0 {
 		usage()
 	}
-	inputGrams := grams(strings.Join(cfg.args, " "))
+	var inputGrams map[gram]struct{}
+	if cfg.candidates && cfg.grams {
+		inputGrams = make(map[gram]struct{})
+		for _, grm := range cfg.args {
+			inputGrams[cfg.gramFor(grm)] = member
+		}
+	} else {
+		inputGrams = grams(strings.Join(cfg.args, " "))
+	}
 	if len(inputGrams) == 0 {
 		os.Exit(1)
 	}
@@ -1011,63 +1025,88 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		fmt.Print("(")
 	}
 	results := 0
+	badFiles := map[string]string{}
+	bad := func(msg string, group string) {
+		delete(hits, gids[group])
+		delete(gids, group)
+		delete(groupStructs, group)
+		badFiles[group] = fmt.Sprintf(msg, group)
+	}
+	for _, group := range groups {
+		if _, deleted := deletedGroups[gids[group]]; deleted {continue}
+		stat, err := os.Stat(group)
+		if err != nil && cfg.force {
+			bad("Skipping '%s' because it is missing", group)
+		} else if err != nil {
+			exitError("Could not read file " + group)
+		} else if stat.ModTime().After(groupStructs[group].lastChanged) {
+			if cfg.force {
+				bad("Skipping '%s' because it has changed", group)
+			} else {
+				exitError(fmt.Sprintf("File has changed since indexing: %s", group))
+			}
+		}
+	}
 	if cfg.candidates {
 		for _, grpNm := range groups {
 			if _, deleted := deletedGroups[gids[grpNm]]; deleted {continue}
-			var grams []string
+			if msg, isBad := badFiles[grpNm]; isBad {
+				fmt.Fprintln(os.Stderr, msg)
+				continue
+			}
+			contents, err := ioutil.ReadFile(grpNm)
+			if err != nil {
+				exitError(fmt.Sprintf("Could not read file: %s", grpNm))
+			}
+			str := string(contents)
+			chunkStarts := []int{}
+			chunkResults := map[int]string{}
+			hexCount := int(0)
 			for _, data := range hits[gids[grpNm]] {
-				grams = append(grams, string(data))
+				if cfg.dataHex {
+					chunkStarts = append(chunkStarts, int(hexCount))
+					if cfg.sexp {
+						chunkResults[hexCount] = fmt.Sprintf("(%d %d \"%s\")", hexCount, 0, hex.EncodeToString(data))
+					} else {
+						chunkResults[hexCount] = hex.EncodeToString(data)
+					}
+					hexCount++
+				} else {
+					lineNo, data := getNumOrPanic(data)
+					start, data := getNumOrPanic(data)
+					len, _ := getNumOrPanic(data)
+					chunkStarts = append(chunkStarts, int(start))
+					if cfg.sexp {
+						chunkResults[int(start)] = fmt.Sprintf(" (%d %d \"%s\")", lineNo, start, escape(str[start:start+len]))
+					} else if cfg.numbers {
+						chunkResults[int(start)] = strconv.Itoa(int(lineNo))
+					} else {
+						chunkResults[int(start)] = fmt.Sprintf("%d:%s", lineNo, str[start:start+len])
+					}
+				}
 				results++
 				if results >= cfg.limit {break}
 			}
-			sort.Strings(grams)
+			sort.Ints(chunkStarts)
 			if cfg.sexp {
 				fmt.Printf("(\"%s\"", escape(grpNm))
-				for _, data := range grams {
-					fmt.Printf(" \"%s\"", escape(data))
+				for _, chunk := range chunkStarts {
+					fmt.Print(chunkResults[chunk])
 				}
 				fmt.Printf(")")
-			} else if cfg.separate {
-				for _, data := range grams {
-					fmt.Printf("%s: %s\n", grpNm, data)
-				}
 			} else {
-				fmt.Printf("%s:", grpNm)
-				for _, data := range grams {
-					fmt.Printf(" %s", data)
+				for _, chunk := range chunkStarts {
+					fmt.Printf("%s:%s\n", grpNm, chunkResults[chunk])
 				}
-				fmt.Println()
 			}
 			if results >= cfg.limit {break}
 		}
 	} else {
-		badFiles := map[string]string{}
-		bad := func(msg string, group string) {
-			delete(hits, gids[group])
-			delete(gids, group)
-			delete(groupStructs, group)
-			badFiles[group] = fmt.Sprintf(msg, group)
-		}
 		var reg *regexp.Regexp
 		if cfg.filter != "" {
 			var err error
 			reg, err = regexp.Compile(cfg.filter)
 			check(err)
-		}
-		for _, group := range groups {
-			if _, deleted := deletedGroups[gids[group]]; deleted {continue}
-			stat, err := os.Stat(group)
-			if err != nil && cfg.force {
-				bad("Skipping '%s' because it is missing", group)
-			} else if err != nil {
-				exitError("Could not read file " + group)
-			} else if stat.ModTime().After(groupStructs[group].lastChanged) {
-				if cfg.force {
-					bad("Skipping '%s' because it has changed", group)
-				} else {
-					exitError(fmt.Sprintf("File has changed since indexing: %s", group))
-				}
-			}
 		}
 		for _, group := range groups {
 			if _, deleted := deletedGroups[gids[group]]; deleted {continue}
@@ -1101,10 +1140,9 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			for _, st := range chunkStarts {
 				start := uint64(st)
 				chunk := string(contents[start:chunkEnds[start]])
-				chunkCmp := strings.ToLower(string(contents[start:chunkEnds[start]]))
 			args:
 				for _, arg := range cfg.args {
-					testChunk := chunkCmp
+					testChunk := strings.ToLower(string(contents[start:chunkEnds[start]]))
 					for len(testChunk) > 0 {
 						i := strings.Index(testChunk, strings.ToLower(arg))
 						if i == -1 {break}
@@ -1124,8 +1162,8 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				} else if cfg.numbers {
 					out = fmt.Sprintf("%s %d", out, lineNos[start])
 				} else {
-					if chunkCmp != "" && chunkCmp[len(chunkCmp)-1] == '\n' {
-						chunkCmp = chunkCmp[:len(chunkCmp)-1]
+					if chunk != "" && chunk[len(chunk)-1] == '\n' {
+						chunk = chunk[:len(chunk)-1]
 					}
 					fmt.Printf("%s:%d:%s\n", group, lineNos[start], chunk)
 				}

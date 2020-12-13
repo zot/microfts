@@ -52,6 +52,15 @@ here
 #+begin_src sh
 ./microfts compact /tmp/bubba
 #+end_src
+** Finding grams for a string
+#+begin_src sh
+./microfts grams "this is a test"
+./microfts grams -gx "this is a test"
+#+end_src
+** Finding candidates for grams
+#+begin_src sh
+./microfts search -candidates -grams /tmp/bubba thi tes est
+#+end_src
 * Usage
 #+begin_example
 Usage:
@@ -89,9 +98,11 @@ Usage:
 505                   query with TEXT for objects
                    -f force search to skip changed and missing files instead of exiting
                    -filter makes search only return chunks that match the REGEXP
-   microfts search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f | -limit N] DB TERMS
-                   find all candidates with the grams for TERMS
+                   REGEXP syntax is here: https://golang.org/pkg/regexp/syntax/
+   microfts search -candidates [-grams | -gx | -gd | -n | -f | -limit N | -dx] DB TERM1 ...
+                   dispay all candidates with the grams for TERMS without filtering
                    -grams indicates TERMS are grams, otherwise extract grams from TERMS
+                   -gx: grams are in hex, -gd: grams are in decimal, otherwise they are 3-char strings
    microfts data [-nx | -dx] DB GROUP
                    get data for each doc in GROUP
    microfts update [-t] DB
@@ -118,6 +129,8 @@ Usage:
   -f    search: skip changed and missing files instead of exiting
   -filter string
         search: filter results that match REGEXP
+  -gd
+        use decimal instead of unicode for grams
   -grams
         get: specify tags for intead of text
         info: print gram coverage

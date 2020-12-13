@@ -94,12 +94,12 @@ Usage:
                    NOTE: THIS DOES NOT RECLAIM SPACE! USE COMPACT FOR THAT
    microfts compact DB
                    Reclaim space for deleted groups
-   microfts search [-n | -partial | -f | - limit N | -filter REGEXP] DB TEXT
+   microfts search [-n | -partial | -f | - limit N | -filter REGEXP | -u] DB TEXT
 505                   query with TEXT for objects
                    -f force search to skip changed and missing files instead of exiting
                    -filter makes search only return chunks that match the REGEXP
                    REGEXP syntax is here: https://golang.org/pkg/regexp/syntax/
-   microfts search -candidates [-grams | -gx | -gd | -n | -f | -limit N | -dx] DB TERM1 ...
+   microfts search -candidates [-grams | -gx | -gd | -n | -f | -limit N | -dx | -u] DB TERM1 ...
                    dispay all candidates with the grams for TERMS without filtering
                    -grams indicates TERMS are grams, otherwise extract grams from TERMS
                    -gx: grams are in hex, -gd: grams are in decimal, otherwise they are 3-char strings
@@ -153,6 +153,7 @@ Usage:
   -sexp
         search: output matches as an s-expression ((file (line offset chunk) ... ) ... )
   -t    update: do a test run, printing what would have happened
+  -u    search: update the database before searching
   -v    verbose
 #+end_example
 * Notes

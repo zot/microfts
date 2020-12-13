@@ -284,6 +284,7 @@ func main() {
 	flag.BoolVar(&lmdbConfig.partial, "partial", false, "search: allow partial matches in search")
 	flag.BoolVar(&lmdbConfig.force, "f", false, "search: skip changed and missing files instead of exiting")
 	flag.BoolVar(&lmdbConfig.test, "t", false, "update: do a test run, printing what would have happened")
+	flag.BoolVar(&lmdbConfig.autoupdate, "u", false, "search: update the database before searching")
 	flag.StringVar(&lmdbConfig.compression, "comp", "", "compression type to use when creating a database")
 	flag.BoolVar(&lmdbConfig.groups, "groups", false, "info: display information for each group")
 	flag.StringVar(&lmdbConfig.filter, "filter", "", "search: filter results that match REGEXP")
@@ -341,12 +342,12 @@ func printUsage() {
                    NOTE: THIS DOES NOT RECLAIM SPACE! USE COMPACT FOR THAT
    %[1]s compact DB
                    Reclaim space for deleted groups
-   %[1]s search [-n | -partial | -f | - limit N | -filter REGEXP] DB TEXT
+   %[1]s search [-n | -partial | -f | - limit N | -filter REGEXP | -u] DB TEXT
 505                   query with TEXT for objects
                    -f force search to skip changed and missing files instead of exiting
                    -filter makes search only return chunks that match the REGEXP
                    REGEXP syntax is here: https://golang.org/pkg/regexp/syntax/
-   %[1]s search -candidates [-grams | -gx | -gd | -n | -f | -limit N | -dx] DB TERM1 ...
+   %[1]s search -candidates [-grams | -gx | -gd | -n | -f | -limit N | -dx | -u] DB TERM1 ...
                    dispay all candidates with the grams for TERMS without filtering
                    -grams indicates TERMS are grams, otherwise extract grams from TERMS
                    -gx: grams are in hex, -gd: grams are in decimal, otherwise they are 3-char strings

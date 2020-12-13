@@ -111,6 +111,7 @@ type lmdbConfigStruct struct {
 	freeOids []byte // compressed oids
 	freeGids []byte // compressed oids
 	//options
+	autoupdate  bool
 	partial     bool
 	limit       int
 	org         bool
@@ -982,6 +983,12 @@ func cmdEmpty(cfg *lmdbConfigStruct) {
 func cmdSearch(cfg *lmdbConfigStruct) {
 	if len(cfg.args) == 0 {
 		usage()
+	}
+	if cfg.autoupdate {
+		args := cfg.args
+		cfg.args = []string{}
+		cmdUpdate(cfg)
+		cfg.args = args
 	}
 	var inputGrams map[gram]struct{}
 	if cfg.candidates && cfg.grams {

@@ -86,7 +86,7 @@ Usage:
    microfts compact DB
                    Reclaim space for deleted groups
    microfts search [-n | -partial | -f | - limit N | -filter REGEXP] DB TEXT
-                   query with TEXT for objects
+505                   query with TEXT for objects
                    -f force search to skip changed and missing files instead of exiting
                    -filter makes search only return chunks that match the REGEXP
    microfts search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f | -limit N] DB TERMS
@@ -116,6 +116,8 @@ Usage:
   -dx
         use hex instead of unicode for object data
   -f    search: skip changed and missing files instead of exiting
+  -filter string
+        search: filter results that match REGEXP
   -grams
         get: specify tags for intead of text
         info: print gram coverage

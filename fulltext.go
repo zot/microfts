@@ -285,6 +285,7 @@ func main() {
 	flag.BoolVar(&lmdbConfig.test, "t", false, "update: do a test run, printing what would have happened")
 	flag.StringVar(&lmdbConfig.compression, "comp", "", "compression type to use when creating a database")
 	flag.BoolVar(&lmdbConfig.groups, "groups", false, "info: display information for each group")
+	flag.StringVar(&lmdbConfig.filter, "filter", "", "search: filter results that match REGEXP")
 	flag.BoolVar(&lmdbConfig.chunks, "chunks", false, "info DB GROUP: display all of a group's chunks")
 	flag.BoolVar(&lmdbConfig.grams, "grams", false, "get: specify tags for intead of text\n"+
 		"info: print gram coverage\n"+
@@ -340,9 +341,10 @@ func printUsage() {
    %[1]s compact DB
                    Reclaim space for deleted groups
    %[1]s search [-n | -partial | -f | - limit N | -filter REGEXP] DB TEXT
-                   query with TEXT for objects
+505                   query with TEXT for objects
                    -f force search to skip changed and missing files instead of exiting
                    -filter makes search only return chunks that match the REGEXP
+                   REGEXP syntax is here: https://golang.org/pkg/regexp/syntax/
    %[1]s search -candidates [-grams | -d D | -gx | -sep | -n | -partial | -f | -limit N] DB TERMS
                    find all candidates with the grams for TERMS
                    -grams indicates TERMS are grams, otherwise extract grams from TERMS

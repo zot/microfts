@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -121,6 +122,7 @@ type lmdbConfigStruct struct {
 	dataString  string
 	grams       bool
 	groups      bool
+	filter      string
 	chunks      bool
 	candidates  bool
 	separate    bool
@@ -1046,6 +1048,12 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			delete(groupStructs, group)
 			badFiles[group] = fmt.Sprintf(msg, group)
 		}
+		var reg *regexp.Regexp
+		if cfg.filter != "" {
+			var err error
+			reg, err = regexp.Compile(cfg.filter)
+			check(err)
+		}
 		for _, group := range groups {
 			if _, deleted := deletedGroups[gids[group]]; deleted {continue}
 			stat, err := os.Stat(group)
@@ -1107,6 +1115,9 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 						testChunk = testChunk[len(arg):]
 					}
 					continue eachChunk // if it made it to here, the arg isn't in the line
+				}
+				if cfg.filter != "" {
+					if !reg.Match([]byte(chunk)) {continue}
 				}
 				if cfg.sexp {
 					fmt.Printf(" (%d %d \"%s\")", lineNos[start], start, escape(chunk))

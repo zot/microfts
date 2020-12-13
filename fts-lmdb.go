@@ -132,6 +132,7 @@ type lmdbConfigStruct struct {
 	compression string
 	force       bool
 	test        bool
+	fuzzy       float64
 }
 
 var lmdbConfig lmdbConfigStruct
@@ -1010,7 +1011,14 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 	groupStructs := map[string]*groupStruct{}
 	deletedGroups := map[uint64]struct{}{}
 	cfg.view(func() {
-		results := cfg.intersectGrams(inputGrams)
+		var results map[uint64]struct{}
+		if cfg.fuzzy != 0 {
+			cfg.fuzzy /= 100
+			cfg.partial = true
+			results = cfg.fuzzyMatch(inputGrams)
+		} else {
+			results = cfg.intersectGrams(inputGrams)
+		}
 		for oid := range results {
 			d := cfg.getChunk(cfg.oidKey(oid))
 			hits[d.gid] = append(hits[d.gid], d.data)
@@ -1028,7 +1036,6 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		}
 	})
 	sort.Strings(groups)
-	results := 0
 	badFiles := map[string]string{}
 	bad := func(msg string, group string) {
 		delete(hits, gids[group])
@@ -1054,110 +1061,32 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 	if cfg.sexp {
 		fmt.Print("(")
 	}
-	if cfg.candidates {
-		for _, grpNm := range groups {
-			if _, deleted := deletedGroups[gids[grpNm]]; deleted {continue}
-			if msg, isBad := badFiles[grpNm]; isBad {
-				fmt.Fprintln(os.Stderr, msg)
-				continue
-			}
-			contents, err := ioutil.ReadFile(grpNm)
-			if err != nil {
-				exitError(fmt.Sprintf("Could not read file: %s", grpNm))
-			}
-			str := string(contents)
-			runes := strings.NewReader(str)
-			runeOffset := 0
-			hexCount := int(0)
-			chunkStarts := []int{}
-			chunkResults := map[int]string{}
-			for _, data := range hits[gids[grpNm]] {
-				if cfg.dataHex {
-					chunkStarts = append(chunkStarts, int(hexCount))
-					if cfg.sexp {
-						chunkResults[hexCount] = fmt.Sprintf("(%d %d \"%s\")", hexCount, 0, hex.EncodeToString(data))
-					} else {
-						chunkResults[hexCount] = hex.EncodeToString(data)
-					}
-					hexCount++
-				} else {
-					lineNo, data := getNumOrPanic(data)
-					start, data := getNumOrPanic(data)
-					len, _ := getNumOrPanic(data)
-					for int(runes.Size())-runes.Len() < int(start) {
-						runeOffset++
-						runes.ReadRune()
-					}
-					chunkStarts = append(chunkStarts, int(start))
-					if cfg.sexp {
-						chunkResults[int(start)] = fmt.Sprintf(" (%d %d \"%s\")", lineNo, runeOffset, escape(str[start:start+len]))
-					} else if cfg.numbers {
-						chunkResults[int(start)] = strconv.Itoa(int(lineNo))
-					} else {
-						chunkResults[int(start)] = fmt.Sprintf("%d:%s", lineNo, str[start:start+len])
-					}
-				}
-				results++
-				if results >= cfg.limit {break}
-			}
-			sort.Ints(chunkStarts)
-			if cfg.sexp {
-				fmt.Printf("(\"%s\"", escape(grpNm))
-				for _, chunk := range chunkStarts {
-					fmt.Print(chunkResults[chunk])
-				}
-				fmt.Printf(")")
-			} else {
-				for _, chunk := range chunkStarts {
-					fmt.Printf("%s:%s\n", grpNm, chunkResults[chunk])
-				}
-			}
-			if results >= cfg.limit {break}
+	var reg *regexp.Regexp
+	if cfg.filter != "" {
+		var err error
+		reg, err = regexp.Compile(cfg.filter)
+		check(err)
+	}
+	for _, grpNm := range groups {
+		if _, deleted := deletedGroups[gids[grpNm]]; deleted {continue}
+		if msg, isBad := badFiles[grpNm]; isBad {
+			fmt.Fprintln(os.Stderr, msg)
+			continue
 		}
-	} else {
-		var reg *regexp.Regexp
-		if cfg.filter != "" {
-			var err error
-			reg, err = regexp.Compile(cfg.filter)
-			check(err)
+		contents, err := ioutil.ReadFile(grpNm)
+		if err != nil {
+			exitError(fmt.Sprintf("Could not read file: %s", grpNm))
 		}
-		for _, group := range groups {
-			if _, deleted := deletedGroups[gids[group]]; deleted {continue}
-			if msg, isBad := badFiles[group]; isBad {
-				fmt.Fprintln(os.Stderr, msg)
-				continue
-			}
-			var chunkStarts []int
-			lineNos := make(map[uint64]uint64)
-			chunkEnds := make(map[uint64]uint64)
-			for _, data := range hits[gids[group]] {
-				lineNo, data := getNumOrPanic(data)
-				start, data := getNumOrPanic(data)
-				len, _ := getNumOrPanic(data)
-				lineNos[start] = lineNo
-				chunkStarts = append(chunkStarts, int(start))
-				chunkEnds[start] = start + len
-			}
-			sort.Ints(chunkStarts)
-			contents, err := ioutil.ReadFile(group)
-			if err != nil {
-				exitError(fmt.Sprintf("Could not read file: %s", group))
-			}
-			runes := strings.NewReader(string(contents))
-			runeOffset := 0
-			out := ""
-			if cfg.sexp {
-				fmt.Printf("(\"%s\"", escape(group))
-			} else if cfg.numbers {
-				out = group + ":"
-			}
-		eachChunk:
-			for _, st := range chunkStarts {
-				start := uint64(st)
-				chunk := string(contents[start:chunkEnds[start]])
+		chunks := cfg.chunkInfo(string(contents), hits[gids[grpNm]])
+		if cfg.sexp {
+			fmt.Printf("(\"%s\"", escape(grpNm))
+		}
+	eachChunk:
+		for _, ch := range chunks {
+			if !cfg.candidates && cfg.fuzzy == 0 { // skip chunks if it doesn't match
 			args:
 				for _, arg := range cfg.args {
-					testChunk := strings.ToLower(string(contents[start:chunkEnds[start]]))
+					testChunk := strings.ToLower(ch.chunk)
 					for len(testChunk) > 0 {
 						i := strings.Index(testChunk, strings.ToLower(arg))
 						if i == -1 {break}
@@ -1170,36 +1099,78 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 					continue eachChunk // if it made it to here, the arg isn't in the line
 				}
 				if cfg.filter != "" {
-					if !reg.Match([]byte(chunk)) {continue}
+					if !reg.Match([]byte(ch.chunk)) {continue}
 				}
-				for int(runes.Size())-runes.Len() < st {
-					runeOffset++
-					runes.ReadRune()
-				}
-				if cfg.sexp {
-					fmt.Printf(" (%d %d \"%s\")", lineNos[start], runeOffset, escape(chunk))
-				} else if cfg.numbers {
-					out = fmt.Sprintf("%s %d", out, lineNos[start])
-				} else {
-					if chunk != "" && chunk[len(chunk)-1] == '\n' {
-						chunk = chunk[:len(chunk)-1]
-					}
-					fmt.Printf("%s:%d:%s\n", group, lineNos[start], chunk)
-				}
-				results++
-				if results >= cfg.limit {break}
 			}
 			if cfg.sexp {
-				fmt.Print(")")
+				fmt.Printf(" (%d %d \"%s\")", ch.line, ch.start, ch.chunk)
 			} else if cfg.numbers {
-				fmt.Println(out)
+				fmt.Printf("%s:%s\n", grpNm, ch.line)
+			} else {
+				fmt.Printf("%s:%d:%s", grpNm, ch.line, ch.chunk)
 			}
-			if results >= cfg.limit {break}
+		}
+		if cfg.sexp {
+			fmt.Printf(")")
 		}
 	}
 	if cfg.sexp {
 		fmt.Println(")")
 	}
+}
+
+type chunkInfo struct {
+	start int
+	line  int
+	chunk string
+}
+
+func (cfg *lmdbConfigStruct) chunkInfo(str string, hits [][]byte) []*chunkInfo {
+	runes := strings.NewReader(str)
+	runeOffset := 0
+	hexCount := 1
+	chunkStarts := []int{}
+	chunks := map[int]*chunkInfo{}
+	results := 0
+	for _, data := range hits {
+		if cfg.candidates {
+			var chunk string
+			if cfg.dataHex {
+				chunk = hex.EncodeToString(data)
+			} else {
+				chunk = escape(string(data))
+			}
+			chunks[int(hexCount)] = &chunkInfo{
+				start: 0,
+				line:  0,
+				chunk: chunk,
+			}
+			chunkStarts = append(chunkStarts, int(hexCount))
+			hexCount++
+		} else {
+			lineNo, data := getNumOrPanic(data)
+			start, data := getNumOrPanic(data)
+			len, _ := getNumOrPanic(data)
+			for int(runes.Size())-runes.Len() < int(start) {
+				runeOffset++
+				runes.ReadRune()
+			}
+			chunkStarts = append(chunkStarts, int(start))
+			chunks[int(start)] = &chunkInfo{
+				start: runeOffset,
+				line:  int(lineNo),
+				chunk: escape(str[start : start+len]),
+			}
+		}
+		results++
+		if results >= cfg.limit {break}
+	}
+	sort.Ints(chunkStarts)
+	var result []*chunkInfo
+	for _, start := range chunkStarts {
+		result = append(result, chunks[start])
+	}
+	return result
 }
 
 func escape(str string) string {
@@ -1233,13 +1204,33 @@ func (cfg *lmdbConfigStruct) intersectGrams(inputGrams map[gram]struct{}) map[ui
 		if grm == smallest {continue}
 		cur := oids.allOids()
 		for oid := range results {
-			_, includes := cur[oid]
-			if !includes { // filter oids that are not common to all grams out of results
+			if _, includes := cur[oid]; !includes { // filter out extraneous oids
 				delete(results, oid)
 				if len(results) == 0 {
 					os.Exit(1)
 				}
 			}
+		}
+	}
+	return results
+}
+
+func (cfg *lmdbConfigStruct) fuzzyMatch(inputGrams map[gram]struct{}) map[uint64]struct{} {
+	occurances := map[uint64]int{}
+	for grm := range inputGrams {
+		oids := cfg.getGram(grm)
+		if oids == nil {
+			os.Exit(1)
+		}
+		for oid := range oids.allOids() {
+			occurances[oid]++
+		}
+	}
+	results := map[uint64]struct{}{}
+	l := float64(len(inputGrams))
+	for oid, count := range occurances {
+		if float64(count)/l >= cfg.fuzzy {
+			results[oid] = member
 		}
 	}
 	return results

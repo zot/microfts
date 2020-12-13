@@ -285,6 +285,7 @@ func main() {
 	flag.BoolVar(&lmdbConfig.force, "f", false, "search: skip changed and missing files instead of exiting")
 	flag.BoolVar(&lmdbConfig.test, "t", false, "update: do a test run, printing what would have happened")
 	flag.BoolVar(&lmdbConfig.autoupdate, "u", false, "search: update the database before searching")
+	flag.Float64Var(&lmdbConfig.fuzzy, "fuzzy", 0, "search: specify a percentage fuzzy match")
 	flag.StringVar(&lmdbConfig.compression, "comp", "", "compression type to use when creating a database")
 	flag.BoolVar(&lmdbConfig.groups, "groups", false, "info: display information for each group")
 	flag.StringVar(&lmdbConfig.filter, "filter", "", "search: filter results that match REGEXP")

@@ -1103,7 +1103,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				}
 			}
 			if cfg.sexp {
-				fmt.Printf(" (%d %d \"%s\")", ch.line, ch.start, ch.chunk)
+				fmt.Printf(" (%d %d \"%s\")", ch.line, ch.start+1, ch.chunk)
 			} else if cfg.numbers {
 				fmt.Printf("%s:%s\n", grpNm, ch.line)
 			} else {

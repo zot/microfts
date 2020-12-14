@@ -28,6 +28,15 @@ const (
 )
 
 const (
+	ERROR = iota + 1
+	ERROR_FILE_MISSING
+	ERROR_FILE_CHANGED
+	ERROR_FILE_UNREADABLE
+	ERROR_FILE_NOT_IN_DB
+	ERROR_DB_MISSING
+)
+
+const (
 	PARAGRAPH = iota
 	HEADLINE
 	BLOCK
@@ -241,7 +250,7 @@ func gramForChar(c rune) gram {
 
 func gramForUnicode(str string) gram {
 	if len(str) != 3 {
-		exitError(fmt.Sprintf("Unicode gram is not a trigram: '%s'", str))
+		exitError(fmt.Sprintf("Unicode gram is not a trigram: '%s'", str), 1)
 	}
 	var grm gram
 	for i := 0; i < 3; i++ {
@@ -256,9 +265,9 @@ func gramForUnicode(str string) gram {
 	return grm
 }
 
-func exitError(arg interface{}) {
+func exitError(arg interface{}, code int) {
 	fmt.Fprintln(os.Stderr, arg)
-	os.Exit(1)
+	os.Exit(code)
 }
 
 func main() {

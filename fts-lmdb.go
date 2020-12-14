@@ -154,7 +154,7 @@ func runLmdb() bool {
 	if cfg.cmd != "create" && cfg.cmd != "grams" {
 		_, err := os.Stat(cfg.db)
 		if err != nil {
-			exitError(fmt.Sprintf("%s: DATABASE %s DOES NOT EXIST", cfg.cmd, cfg.db))
+			exitError(fmt.Sprintf("%s: DATABASE %s DOES NOT EXIST", cfg.cmd, cfg.db), ERROR_DB_MISSING)
 		}
 	}
 	cmds[cfg.cmd](cfg)
@@ -278,27 +278,16 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 					coverage[amt] = 0
 				}
 				totalBytes, chunkBytes, gramBytes := 0, 0, 0
-				cur, err := cfg.txn.OpenCursor(cfg.chunkDb)
-				check(err)
-				k, v, err := cur.Get(nil, nil, lmdb.First)
-				count := 0
-				for err == nil {
-					count++
+				cfg.iterate(cfg.chunkDb, func(cur *lmdb.Cursor, k, v []byte) {
 					totalBytes += len(k) + len(v)
 					chunkBytes += len(k) + len(v)
-					k, v, err = cur.Get(nil, nil, lmdb.Next)
-				}
-				if err != nil && !lmdb.IsNotFound(err) {
-					check(err)
-				}
-				cur.Close()
-				cur, err = cfg.txn.OpenCursor(cfg.gramDb)
-				check(err)
-				_, _, err = cur.Get(nil, nil, lmdb.First)
-				check(err)
-				for {
-					k, v, err := cur.Get(nil, nil, lmdb.Next) // skip first gram: system record
-					if err != nil {break}
+				})
+				first := true
+				cfg.iterate(cfg.gramDb, func(cur *lmdb.Cursor, k, v []byte) {
+					if first {
+						first = false
+						return
+					}
 					oids := oidListFor(v)
 					totalBytes += len(k) + len(v)
 					gramBytes += len(k) + len(v)
@@ -314,11 +303,7 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 							coverage[amt]++
 						}
 					}
-				}
-				if err != nil && !lmdb.IsNotFound(err) {
-					check(err)
-				}
-				cur.Close()
+				})
 				if minOids == maxInt {
 					minOids = 0
 				}
@@ -328,19 +313,21 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 				fmt.Printf("max oids: %d\n", maxOids)
 				fmt.Printf("min oids: %d\n", minOids)
 				for _, amt := range amounts {
-					fmt.Printf("%d grams are in %f%% of chunks\n", coverage[amt], 100*amt)
+					fmt.Printf("%5d grams appear in less than %7.4f%% of chunks\n", coverage[amt], 100*amt)
 				}
 			}
 		} else if len(cfg.args) == 1 {
 			_, group := cfg.getGroup(cfg.groupName())
 			if group == nil {
-				exitError(fmt.Sprintf("NO GROUP %s\n", cfg.groupName()))
+				exitError(fmt.Sprintf("NO GROUP %s\n", cfg.groupName()), ERROR_FILE_NOT_IN_DB)
 			}
 			if !printGroupInfo(group) {return}
 			if cfg.chunks {
 				contents, err := ioutil.ReadFile(group.groupName)
-				if err != nil {
-					exitError(fmt.Sprintf("Could not read file: %s", group.groupName))
+				if os.IsNotExist(err) {
+					exitError(fmt.Sprintf("File does not exist: %s", group.groupName), ERROR_FILE_MISSING)
+				} else if err != nil {
+					exitError(fmt.Sprintf("Could not read file: %s", group.groupName), ERROR_FILE_UNREADABLE)
 				}
 				str := string(contents)
 				if cfg.sexp {
@@ -1049,12 +1036,12 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		if err != nil && cfg.force {
 			bad("Skipping '%s' because it is missing", group)
 		} else if err != nil {
-			exitError("Could not read file " + group)
+			exitError("Could not read file "+group, ERROR_FILE_UNREADABLE)
 		} else if stat.ModTime().After(groupStructs[group].lastChanged) {
 			if cfg.force {
 				bad("Skipping '%s' because it has changed", group)
 			} else {
-				exitError(fmt.Sprintf("File has changed since indexing: %s", group))
+				exitError(fmt.Sprintf("File has changed since indexing: %s", group), ERROR_FILE_CHANGED)
 			}
 		}
 	}
@@ -1074,8 +1061,10 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			continue
 		}
 		contents, err := ioutil.ReadFile(grpNm)
-		if err != nil {
-			exitError(fmt.Sprintf("Could not read file: %s", grpNm))
+		if os.IsExist(err) {
+			exitError(fmt.Sprintf("File does not exist: %s", grpNm), ERROR_FILE_MISSING)
+		} else if err != nil {
+			exitError(fmt.Sprintf("Could not read file: %s", grpNm), ERROR_FILE_UNREADABLE)
 		}
 		chunks := cfg.chunkInfo(string(contents), hits[gids[grpNm]])
 		if cfg.sexp {
@@ -1105,7 +1094,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			if cfg.sexp {
 				fmt.Printf(" (%d %d \"%s\")", ch.line, ch.start+1, ch.chunk)
 			} else if cfg.numbers {
-				fmt.Printf("%s:%s\n", grpNm, ch.line)
+				fmt.Printf("%s:%d\n", grpNm, ch.line)
 			} else {
 				fmt.Printf("%s:%d:%s", grpNm, ch.line, ch.chunk)
 			}
@@ -1443,7 +1432,9 @@ func getCountedBytes(bytes []byte) (result []byte, rest []byte) {
 
 func getNumOrPanic(bytes []byte) (uint64, []byte) {
 	result, bytes, err := getNum(bytes)
-	check(err)
+	if err != nil {
+		exitError("End of entry while reading number", ERROR)
+	}
 	return result, bytes
 }
 

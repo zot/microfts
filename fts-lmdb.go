@@ -1083,7 +1083,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		}
 	eachChunk:
 		for _, ch := range chunks {
-			if !cfg.candidates && cfg.fuzzy == 0 { // skip chunks if it doesn't match
+			if !cfg.candidates && cfg.fuzzy == 0 { // skip chunk if it doesn't match
 			args:
 				for _, arg := range cfg.args {
 					testChunk := strings.ToLower(ch.chunk)
@@ -1126,49 +1126,44 @@ type chunkInfo struct {
 }
 
 func (cfg *lmdbConfigStruct) chunkInfo(str string, hits [][]byte) []*chunkInfo {
-	runes := strings.NewReader(str)
-	runeOffset := 0
-	hexCount := 1
-	chunkStarts := []int{}
-	chunks := map[int]*chunkInfo{}
-	results := 0
+	var result []*chunkInfo
 	for _, data := range hits {
+		var start, lineNo uint64
 		if cfg.candidates {
-			var chunk string
+			result = append(result, &chunkInfo{
+				start: len(result), // candidates are just numbered consecutively
+				line:  len(result), // candidates are just numbered consecutively
+			})
 			if cfg.dataHex {
-				chunk = hex.EncodeToString(data)
+				result[len(result)-1].chunk = hex.EncodeToString(data)
 			} else {
-				chunk = escape(string(data))
+				result[len(result)-1].chunk = escape(string(data))
 			}
-			chunks[int(hexCount)] = &chunkInfo{
-				start: 0,
-				line:  0,
-				chunk: chunk,
-			}
-			chunkStarts = append(chunkStarts, int(hexCount))
-			hexCount++
 		} else {
-			lineNo, data := getNumOrPanic(data)
-			start, data := getNumOrPanic(data)
+			lineNo, data = getNumOrPanic(data)
+			start, data = getNumOrPanic(data)
 			len, _ := getNumOrPanic(data)
-			for int(runes.Size())-runes.Len() < int(start) {
+			result = append(result, &chunkInfo{
+				line:  int(lineNo),
+				start: int(start),
+				chunk: escape(str[start : start+len]),
+			})
+		}
+		if len(result) >= cfg.limit {break}
+	}
+	if !cfg.candidates { // need to sort and adjust results
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].start < result[j].start
+		})
+		runes := strings.NewReader(str)
+		runeOffset := 0
+		for _, chunk := range result {
+			for int(runes.Size())-runes.Len() < chunk.start {
 				runeOffset++
 				runes.ReadRune()
 			}
-			chunkStarts = append(chunkStarts, int(start))
-			chunks[int(start)] = &chunkInfo{
-				start: runeOffset,
-				line:  int(lineNo),
-				chunk: escape(str[start : start+len]),
-			}
+			chunk.start = runeOffset
 		}
-		results++
-		if results >= cfg.limit {break}
-	}
-	sort.Ints(chunkStarts)
-	var result []*chunkInfo
-	for _, start := range chunkStarts {
-		result = append(result, chunks[start])
 	}
 	return result
 }

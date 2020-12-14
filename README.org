@@ -62,15 +62,14 @@ here
 ./microfts search -candidates -grams /tmp/bubba thi tes est
 #+end_src
 * Usage
-Here are the exit codes:
-
+** Exit Codes
 1. misc error
 2. file is missing
 3. file has changed
 4. file is unreadable
 5. no entry for file in database
 6. database missing
-
+** Help text
 #+begin_example
 Usage:
    microfts info -groups DB

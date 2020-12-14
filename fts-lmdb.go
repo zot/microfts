@@ -313,7 +313,7 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 				fmt.Printf("max oids: %d\n", maxOids)
 				fmt.Printf("min oids: %d\n", minOids)
 				for _, amt := range amounts {
-					fmt.Printf("%5d grams appear in less than %7.4f%% of chunks\n", coverage[amt], 100*amt)
+					fmt.Printf("%5d grams appear in %7.4f%% or fewer chunks\n", coverage[amt], 100*amt)
 				}
 			}
 		} else if len(cfg.args) == 1 {

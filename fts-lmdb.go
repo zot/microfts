@@ -60,6 +60,8 @@ const (
 	deleted
 )
 
+var escape = strconv.Quote
+
 var groupValidity = []string{"valid", "changed", "deleted"}
 
 var systemID = []byte{0}
@@ -1163,11 +1165,6 @@ func (cfg *lmdbConfigStruct) chunkInfo(str []rune, hits [][]byte) []*chunkInfo {
 		})
 	}
 	return result
-}
-
-func escape(str string) string {
-	str = strings.Replace(str, "\\", "\\\\", -1)
-	return strings.Replace(str, "\"", "\\\"", -1)
 }
 
 func isGramChar(c byte) bool {

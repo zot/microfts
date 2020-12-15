@@ -334,9 +334,13 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 					fmt.Print("(")
 				}
 				if group.org {
+					runeOffset := 0
+					prev := 0
 					forParts(str, func(line, typ, start, end int) {
 						if cfg.sexp {
-							fmt.Printf(" (%d %d \"%s\")", line, start, escape(str[start:end]))
+							runeOffset += len([]rune(str[prev:start]))
+							fmt.Printf(" (%d %d \"%s\")", line, runeOffset+1, escape(str[start:end]))
+							prev = start
 						} else {
 							fmt.Printf("%d:%s\n", line, str[start:end])
 						}
@@ -488,13 +492,19 @@ func (cfg *lmdbConfigStruct) indexOrg(group string) {
 	contents, err := ioutil.ReadAll(cfg.input)
 	check(err)
 	str := string(contents)
+	runeOffset := 0
+	prev := 0
 	forParts(str, func(line, typ, start, end int) {
 		g := grams(str[start:end])
 		if len(g) > 0 {
+			runeOffset += len([]rune(str[prev:start]))
+			runeLen := len([]rune(str[start:end]))
 			buf := new(myBuf)
 			buf.putNum(uint64(line))
-			buf.putNum(uint64(start))
-			buf.putNum(uint64(end - start))
+			buf.putNum(uint64(runeOffset))
+			buf.putNum(uint64(runeLen))
+			runeOffset += runeLen
+			prev = end
 			cfg.data = buf.bytes
 			oid, d := cfg.initChunk() // make chunk for chunk
 			for grm := range g {
@@ -510,13 +520,16 @@ func (cfg *lmdbConfigStruct) indexLines(group string) {
 	open, date := cfg.openInputFile(group)
 	if !open {return}
 	pos := 0
+	runeOffset := 0
 	for lineNo := 1; ; lineNo++ {
 		line, err := readLine(cfg.input)
 		if err == io.EOF {break}
+		runes := []rune(line)
 		buf := new(myBuf)
 		buf.putNum(uint64(lineNo))
-		buf.putNum(uint64(pos))
-		buf.putNum(uint64(len(line)))
+		buf.putNum(uint64(runeOffset))
+		buf.putNum(uint64(len(runes)))
+		runeOffset += len(runes)
 		cfg.data = buf.bytes
 		oid, d := cfg.initChunk() // make chunk for line
 		for grm := range grams(line) {
@@ -731,7 +744,7 @@ func (cfg *lmdbConfigStruct) load() {
 		cfg.nextGID = oid
 		free, rest := getCountedBytes(rest)
 		cfg.freeOids = free
-		free, rest = getCountedBytes(rest)
+		free, _ = getCountedBytes(rest)
 		cfg.freeGids = free
 	}
 }
@@ -1066,7 +1079,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		} else if err != nil {
 			exitError(fmt.Sprintf("Could not read file: %s", grpNm), ERROR_FILE_UNREADABLE)
 		}
-		chunks := cfg.chunkInfo(string(contents), hits[gids[grpNm]])
+		chunks := cfg.chunkInfo([]rune(string(contents)), hits[gids[grpNm]])
 		if cfg.sexp {
 			fmt.Printf("(\"%s\"", escape(grpNm))
 		}
@@ -1114,7 +1127,7 @@ type chunkInfo struct {
 	chunk string
 }
 
-func (cfg *lmdbConfigStruct) chunkInfo(str string, hits [][]byte) []*chunkInfo {
+func (cfg *lmdbConfigStruct) chunkInfo(str []rune, hits [][]byte) []*chunkInfo {
 	var result []*chunkInfo
 	for _, data := range hits {
 		var start, lineNo uint64
@@ -1135,7 +1148,7 @@ func (cfg *lmdbConfigStruct) chunkInfo(str string, hits [][]byte) []*chunkInfo {
 			result = append(result, &chunkInfo{
 				line:  int(lineNo),
 				start: int(start),
-				chunk: escape(str[start : start+len]),
+				chunk: escape(string(str[start : start+len])),
 			})
 		}
 		if len(result) >= cfg.limit {break}
@@ -1144,15 +1157,6 @@ func (cfg *lmdbConfigStruct) chunkInfo(str string, hits [][]byte) []*chunkInfo {
 		sort.Slice(result, func(i, j int) bool {
 			return result[i].start < result[j].start
 		})
-		runes := strings.NewReader(str)
-		runeOffset := 0
-		for _, chunk := range result {
-			for int(runes.Size())-runes.Len() < chunk.start {
-				runeOffset++
-				runes.ReadRune()
-			}
-			chunk.start = runeOffset
-		}
 	}
 	return result
 }

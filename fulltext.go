@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	//"github.com/pkg/profile"
 )
 
 const (
@@ -276,7 +277,9 @@ func main() {
 	if len(os.Args) == 1 {
 		usage()
 	}
+	prof := false
 	flag.Usage = printUsage
+	//flag.BoolVar(&prof, "prof", false, "profile cpu")
 	flag.BoolVar(&diag, "v", false, "verbose")
 	flag.IntVar(&lmdbConfig.gramSize, "s", 0, "gram size")
 	flag.StringVar(&lmdbConfig.delimiter, "d", ",", "delimiter for unicode tags")
@@ -303,6 +306,11 @@ func main() {
 		"info: print gram coverage\n"+
 		"search: specify grams instead of search terms")
 	flag.CommandLine.Parse(os.Args[2:])
+	//if prof {
+	//	defer profile.Start().Stop()
+	//	//defer profile.Start(profile.MemProfile).Stop()
+	//	//defer profile.Start(profile.TraceProfile).Stop()
+	//}
 	if !runLmdb() {
 		usage()
 	}

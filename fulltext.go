@@ -159,6 +159,8 @@ func orgPart(pos int, str string) (int, int, int) {
 			if para < pos {return PARAGRAPH, para, pos}
 			if typ != BLANK {return typ, pos, pos + lineEnd}
 			para = pos + lineEnd + 1
+		} else if pos-para > 1 && str[pos-2:pos] == "\n\n" {
+			return PARAGRAPH, para, pos
 		}
 	}
 	if para < len(str) {return PARAGRAPH, para, len(str)}

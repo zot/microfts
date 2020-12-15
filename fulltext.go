@@ -277,8 +277,8 @@ func main() {
 	if len(os.Args) == 1 {
 		usage()
 	}
-	prof := false
 	flag.Usage = printUsage
+	//prof := false
 	//flag.BoolVar(&prof, "prof", false, "profile cpu")
 	flag.BoolVar(&diag, "v", false, "verbose")
 	flag.IntVar(&lmdbConfig.gramSize, "s", 0, "gram size")
@@ -292,7 +292,10 @@ func main() {
 	flag.BoolVar(&lmdbConfig.numbers, "n", false, "only print line numbers for search")
 	flag.IntVar(&lmdbConfig.limit, "limit", maxInt, "search: limit the number of results")
 	flag.BoolVar(&lmdbConfig.org, "org", false, "index org-mode chunks instead of lines")
-	flag.BoolVar(&lmdbConfig.sexp, "sexp", false, "search: output matches as an s-expression ((file (line offset chunk) ... ) ... )")
+	flag.BoolVar(&lmdbConfig.sexp, "sexp", false, `search: output matches as an s-expression ((FILE (POS LINE OFFSET chunk) ... ) ... )
+POS is the 1-based character position of the chunk in the file
+LINE is the 1-based line of the chunk in the file
+OFFSET is the 0-based offset of the first match in the chunk`)
 	flag.BoolVar(&lmdbConfig.partial, "partial", false, "search: allow partial matches in search")
 	flag.BoolVar(&lmdbConfig.force, "f", false, "search: skip changed and missing files instead of exiting")
 	flag.BoolVar(&lmdbConfig.test, "t", false, "update: do a test run, printing what would have happened")

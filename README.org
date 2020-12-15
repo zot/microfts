@@ -123,48 +123,51 @@ Usage:
    microfts is targeted for groups of small documents, like lines in a file.
 
   -candidates
-    	return docs with grams for search
+        return docs with grams for search
   -chunks
-    	info DB GROUP: display all of a group's chunks
+        info DB GROUP: display all of a group's chunks
   -comp string
-    	compression type to use when creating a database
+        compression type to use when creating a database
   -d string
-    	delimiter for unicode tags (default ",")
+        delimiter for unicode tags (default ",")
   -data string
-    	data to define for object
+        data to define for object
   -dx
-    	use hex instead of unicode for object data
-  -f	search: skip changed and missing files instead of exiting
+        use hex instead of unicode for object data
+  -f    search: skip changed and missing files instead of exiting
   -filter string
-    	search: filter results that match REGEXP
+        search: filter results that match REGEXP
   -fuzzy float
-    	search: specify a percentage fuzzy match
+        search: specify a percentage fuzzy match
   -gd
-    	use decimal instead of unicode for grams
+        use decimal instead of unicode for grams
   -grams
-    	get: specify tags for intead of text
-    	info: print gram coverage
-    	search: specify grams instead of search terms
+        get: specify tags for intead of text
+        info: print gram coverage
+        search: specify grams instead of search terms
   -groups
-    	info: display information for each group
+        info: display information for each group
   -gx
-    	use hex instead of unicode for grams
+        use hex instead of unicode for grams
   -limit int
-    	search: limit the number of results (default 9223372036854775807)
-  -n	only print line numbers for search
+        search: limit the number of results (default 9223372036854775807)
+  -n    only print line numbers for search
   -org
-    	index org-mode chunks instead of lines
+        index org-mode chunks instead of lines
   -partial
-    	search: allow partial matches in search
+        search: allow partial matches in search
   -s int
-    	gram size
+        gram size
   -sep
-    	print candidates on separate lines
+        print candidates on separate lines
   -sexp
-    	search: output matches as an s-expression ((file (line offset chunk) ... ) ... )
-  -t	update: do a test run, printing what would have happened
-  -u	search: update the database before searching
-  -v	verbose
+        search: output matches as an s-expression ((FILE (POS LINE OFFSET chunk) ... ) ... )
+        POS is the 1-based character position of the chunk in the file
+        LINE is the 1-based line of the chunk in the file
+        OFFSET is the 0-based offset of the first match in the chunk
+  -t    update: do a test run, printing what would have happened
+  -u    search: update the database before searching
+  -v    verbose
 #+end_example
 * Notes
 ** Grams

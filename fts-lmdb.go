@@ -1085,6 +1085,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		}
 	eachChunk:
 		for _, ch := range chunks {
+			match := -1
 			if !cfg.candidates && cfg.fuzzy == 0 { // skip chunk if it doesn't match
 			args:
 				for _, arg := range cfg.args {
@@ -1094,6 +1095,9 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 						if i == -1 {break}
 						if cfg.partial || ((i == 0 || !isGramChar(testChunk[i-1])) &&
 							(i+len(arg) == len(testChunk) || !isGramChar(testChunk[i+len(arg)]))) {
+							if match == -1 {
+								match = i
+							}
 							continue args // found a hit for this arg
 						}
 						testChunk = testChunk[len(arg):]
@@ -1105,7 +1109,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				}
 			}
 			if cfg.sexp {
-				fmt.Printf(" (%d %d \"%s\")", ch.line, ch.start+1, ch.chunk)
+				fmt.Printf(" (%d %d %d \"%s\")", ch.start+1, ch.line, len([]rune(ch.chunk[:match])), ch.chunk)
 			} else if cfg.numbers {
 				fmt.Printf("%s:%d\n", grpNm, ch.line)
 			} else {

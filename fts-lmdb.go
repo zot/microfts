@@ -58,8 +58,8 @@ const (
 	fuzzyLineFormat = "%[6]s:%[1]d:%4.1[4]f%%:%[5]s\n"
 	groupEnd        = ""
 	sexpGroupStart  = ""
-	infoSexpFormat  = "(:filename \"%[6]s\" :line %[2]d :offset %[3]d :text \"%[5]s\")"
-	sexpFormat      = "(:filename \"%[6]s\" :line %[2]d :offset %[3]d :text \"%[5]s\" :percent %[4]f)"
+	infoSexpFormat  = "(:filename \"%[6]s\" :line %[2]d :offset %[3]d :text \"%[5]s\")\n"
+	sexpFormat      = "(:filename \"%[6]s\" :line %[2]d :offset %[3]d :text \"%[5]s\" :percent %[4]f)\n"
 	sexpGroupEnd    = "\n"
 )
 

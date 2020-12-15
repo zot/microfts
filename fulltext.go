@@ -205,7 +205,7 @@ func check(err error) {
 }
 
 // 3 digits in base 37 fits into two bytes
-func grams(str string) map[gram]struct{} {
+func grams(str string, partial bool) map[gram]struct{} {
 	str = str + " "
 	result := make(map[gram]struct{})
 	var grm gram
@@ -217,6 +217,7 @@ func grams(str string) map[gram]struct{} {
 		} else {
 			grm = gram(((int(grm) * int(GRAM_BASE)) + int(v)) % int(GRAM_3_BASE))
 		}
+		if partial && (grm/GRAM_2_BASE == 0 || grm/GRAM_BASE%GRAM_BASE == 0 || grm%GRAM_BASE == 0) {continue}
 		if grm >= GRAM_BASE { // don't track grams with two leading spaces
 			result[grm] = member
 		}

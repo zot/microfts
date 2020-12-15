@@ -523,7 +523,7 @@ func (cfg *lmdbConfigStruct) indexOrg(group string) {
 	runeOffset := 0
 	prev := 0
 	forParts(str, func(line, typ, start, end int) {
-		g := grams(str[start:end])
+		g := grams(str[start:end], false)
 		if len(g) > 0 {
 			runeOffset += len([]rune(str[prev:start]))
 			runeLen := len([]rune(str[start:end]))
@@ -560,7 +560,7 @@ func (cfg *lmdbConfigStruct) indexLines(group string) {
 		runeOffset += len(runes)
 		cfg.data = buf.bytes
 		oid, d := cfg.initChunk() // make chunk for line
-		for grm := range grams(line) {
+		for grm := range grams(line, false) {
 			cfg.addGramEntry(grm, oid, d)
 		}
 		cfg.putChunk(oid, d)
@@ -839,7 +839,7 @@ func cmdGrams(cfg *lmdbConfigStruct) {
 		usage()
 	}
 	first := true
-	for grm := range grams(cfg.db) { // db is actually the phrase
+	for grm := range grams(cfg.db, cfg.partial) { // db is actually the phrase
 		if first {
 			first = false
 		} else {
@@ -1026,7 +1026,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			inputGrams[cfg.gramFor(grm)] = member
 		}
 	} else {
-		inputGrams = grams(strings.Join(cfg.args, " "))
+		inputGrams = grams(strings.Join(cfg.args, " "), cfg.partial)
 	}
 	if len(inputGrams) == 0 {
 		os.Exit(1)

@@ -47,20 +47,26 @@ VALUE IS THE 4-byte OID
 
 const (
 	// map_size 5GB max
-	mapSize        = 1024 * 1024 * 1024 * 10
-	dbs            = 10        // objects, names, grams
-	gramSize       = 2         // bytes
-	maxFileIDBytes = 65536 * 2 // number of bytes in a list of all file ids
-	maxInt         = int(^uint(0) >> 1)
-	null64         = 0xFFFFFFFFFFFFFFFF
+	mapSize         = 1024 * 1024 * 1024 * 10
+	dbs             = 10        // objects, names, grams
+	gramSize        = 2         // bytes
+	maxFileIDBytes  = 65536 * 2 // number of bytes in a list of all file ids
+	maxInt          = int(^uint(0) >> 1)
+	null64          = 0xFFFFFFFFFFFFFFFF
+	groupStart      = ""
+	lineFormat      = "%[6]s:%[1]d:%[5]s\n"
+	fuzzyLineFormat = "%[6]s:%[1]d:%4.1[4]f%%:%[5]s\n"
+	groupEnd        = ""
+	sexpGroupStart  = ""
+	infoSexpFormat  = "(:filename \"%[6]s\" :line %[2]d :offset %[3]d :text \"%[5]s\")"
+	sexpFormat      = "(:filename \"%[6]s\" :line %[2]d :offset %[3]d :text \"%[5]s\" :percent %[4]f)"
+	sexpGroupEnd    = "\n"
 )
 
 const (
 	valid = iota
 	deleted
 )
-
-var escape = strconv.Quote
 
 var groupValidity = []string{"valid", "changed", "deleted"}
 
@@ -84,6 +90,15 @@ type groupStruct struct {
 
 type myBuf struct {
 	bytes []byte
+}
+
+type chunkInfo struct {
+	oid      uint64
+	start    int
+	line     int
+	chunk    string
+	match    float64
+	original *chunk
 }
 
 type lmdbConfigStruct struct {
@@ -135,6 +150,10 @@ type lmdbConfigStruct struct {
 	force       bool
 	test        bool
 	fuzzy       float64
+	format      string
+	startFormat string
+	endFormat   string
+	sort        bool
 }
 
 var lmdbConfig lmdbConfigStruct
@@ -152,13 +171,26 @@ func runLmdb() bool {
 	cfg.cmd = os.Args[1]
 	cfg.args = flag.Args()[1:]
 	cfg.oidBuf = make([]byte, 1024)
-	cfg.clean()
+	if cfg.sexp {
+		if cfg.format == lineFormat {
+			cfg.format = sexpFormat
+		}
+		if cfg.startFormat == groupStart {
+			cfg.startFormat = sexpGroupStart
+		}
+		if cfg.format == groupEnd {
+			cfg.endFormat = sexpGroupEnd
+		}
+	} else if cfg.fuzzy > 0 && cfg.format == lineFormat {
+		cfg.format = fuzzyLineFormat
+	}
 	if cfg.cmd != "create" && cfg.cmd != "grams" {
 		_, err := os.Stat(cfg.db)
 		if err != nil {
 			exitError(fmt.Sprintf("%s: DATABASE %s DOES NOT EXIST", cfg.cmd, cfg.db), ERROR_DB_MISSING)
 		}
 	}
+	cfg.clean()
 	cmds[cfg.cmd](cfg)
 	return true
 }
@@ -325,6 +357,9 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 			}
 			if !printGroupInfo(group) {return}
 			if cfg.chunks {
+				if cfg.format == sexpFormat {
+					cfg.format = infoSexpFormat
+				}
 				contents, err := ioutil.ReadFile(group.groupName)
 				if os.IsNotExist(err) {
 					exitError(fmt.Sprintf("File does not exist: %s", group.groupName), ERROR_FILE_MISSING)
@@ -332,42 +367,33 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 					exitError(fmt.Sprintf("Could not read file: %s", group.groupName), ERROR_FILE_UNREADABLE)
 				}
 				str := string(contents)
-				if cfg.sexp {
-					fmt.Print("(")
-				}
+				runeOffset := 0
+				printf(cfg.startFormat, group.groupName)
 				if group.org {
-					runeOffset := 0
 					prev := 0
 					forParts(str, func(line, typ, start, end int) {
-						if cfg.sexp {
-							runeOffset += len([]rune(str[prev:start]))
-							fmt.Printf(" (%d %d \"%s\")", line, runeOffset+1, escape(str[start:end]))
-							prev = start
-						} else {
-							fmt.Printf("%d:%s\n", line, str[start:end])
-						}
+						runeOffset += len([]rune(str[prev:start]))
+						fmt.Printf(cfg.format, runeOffset+1, line, 0, 0.0, escape(str[start:end]), cfg.groupName)
+						prev = start
 					})
 				} else {
 					input := bufio.NewReader(strings.NewReader(str))
 					pos := 0
 					for lineNo := 1; ; lineNo++ {
 						line, err := readLine(input)
+						if err == io.EOF {break}
+						check(err)
+						runes := []rune(line)
 						lineLen := len(line)
 						if lineLen > 0 && line[lineLen-1] == '\n' {
 							line = line[:lineLen-1]
 						}
-						if err == io.EOF {break}
-						if cfg.sexp {
-							fmt.Printf(" (%d %d \"%s\")", lineNo, pos, escape(line))
-						} else {
-							fmt.Printf("%d:%s\n", lineNo, line)
-						}
+						fmt.Printf(cfg.format, runeOffset+1, line, 0, 0.0, escape(line), group.groupName)
 						pos += lineLen
+						runeOffset += len(runes)
 					}
 				}
-				if cfg.sexp {
-					fmt.Print(" )")
-				}
+				printf(cfg.endFormat, group.groupName)
 			}
 		}
 	})
@@ -1007,23 +1033,28 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 	}
 	cfg.open(false)
 	defer cfg.env.Close()
-	hits := make(map[uint64][][]byte)
+	hits := make(map[uint64]map[uint64]*chunk)
 	groups := make([]string, 0, 16)
+	groupsByGid := map[uint64]*groupStruct{}
 	gids := make(map[string]uint64)
 	groupStructs := map[string]*groupStruct{}
 	deletedGroups := map[uint64]struct{}{}
+	fuzzyMatches := map[uint64]float64{}
 	cfg.view(func() {
 		var results map[uint64]struct{}
 		if cfg.fuzzy != 0 {
 			cfg.fuzzy /= 100
 			cfg.partial = true
-			results = cfg.fuzzyMatch(inputGrams)
+			results = cfg.fuzzyMatch(inputGrams, fuzzyMatches)
 		} else {
 			results = cfg.intersectGrams(inputGrams)
 		}
 		for oid := range results {
 			d := cfg.getChunk(cfg.oidKey(oid))
-			hits[d.gid] = append(hits[d.gid], d.data)
+			if hits[d.gid] == nil {
+				hits[d.gid] = make(map[uint64]*chunk)
+			}
+			hits[d.gid][oid] = d
 		}
 		for gid := range hits {
 			group := cfg.getGroupWithGid(gid)
@@ -1032,6 +1063,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				gids[group.groupName] = gid
 				groups = append(groups, group.groupName)
 				groupStructs[group.groupName] = group
+				groupsByGid[gid] = group
 			} else {
 				deletedGroups[gid] = member
 			}
@@ -1060,15 +1092,13 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			}
 		}
 	}
-	if cfg.sexp {
-		fmt.Print("(")
-	}
 	var reg *regexp.Regexp
 	if cfg.filter != "" {
 		var err error
 		reg, err = regexp.Compile(cfg.filter)
 		check(err)
 	}
+	var sortedMatches []*chunkInfo
 	for _, grpNm := range groups {
 		if _, deleted := deletedGroups[gids[grpNm]]; deleted {continue}
 		if msg, isBad := badFiles[grpNm]; isBad {
@@ -1081,14 +1111,19 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		} else if err != nil {
 			exitError(fmt.Sprintf("Could not read file: %s", grpNm), ERROR_FILE_UNREADABLE)
 		}
-		chunks := cfg.chunkInfo([]rune(string(contents)), hits[gids[grpNm]])
-		if cfg.sexp {
-			fmt.Printf("(\"%s\"", escape(grpNm))
-		}
+		chunks := cfg.chunkInfo([]rune(string(contents)), hits[gids[grpNm]], fuzzyMatches)
+		printf(cfg.startFormat, grpNm)
 	eachChunk:
 		for _, ch := range chunks {
+			if cfg.fuzzy != 0 && cfg.sort {
+				sortedMatches = append(sortedMatches, ch)
+				continue
+			}
 			match := -1
-			if !cfg.candidates && cfg.fuzzy == 0 { // skip chunk if it doesn't match
+			if cfg.fuzzy != 0.0 {
+				match = 0
+			}
+			if !cfg.candidates && cfg.fuzzy == 0 { // check if chunk matches and skip if it doesn't
 			args:
 				for _, arg := range cfg.args {
 					testChunk := strings.ToLower(ch.chunk)
@@ -1110,59 +1145,86 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 					if !reg.Match([]byte(ch.chunk)) {continue}
 				}
 			}
-			if cfg.sexp {
-				fmt.Printf(" (%d %d %d \"%s\")", ch.start+1, ch.line, len([]rune(ch.chunk[:match])), ch.chunk)
-			} else if cfg.numbers {
+			if cfg.numbers {
 				fmt.Printf("%s:%d\n", grpNm, ch.line)
-			} else {
-				fmt.Printf("%s:%d:%s", grpNm, ch.line, ch.chunk)
+			} else if cfg.fuzzy == 0 || !cfg.sort {
+				chunk := ch.chunk
+				if len(chunk) > 0 && chunk[len(chunk)-1] == '\n' {
+					chunk = chunk[:len(chunk)-1]
+				}
+				fmt.Printf(cfg.format, ch.start, ch.line, len([]rune(ch.chunk[:match])), ch.match*100, escape(ch.chunk), grpNm)
 			}
 		}
-		if cfg.sexp {
-			fmt.Printf(")")
-		}
-	}
-	if cfg.sexp {
-		fmt.Println(")")
-	}
-}
-
-type chunkInfo struct {
-	start int
-	line  int
-	chunk string
-}
-
-func (cfg *lmdbConfigStruct) chunkInfo(str []rune, hits [][]byte) []*chunkInfo {
-	var result []*chunkInfo
-	for _, data := range hits {
-		var start, lineNo uint64
-		if cfg.candidates {
-			result = append(result, &chunkInfo{
-				start: len(result), // candidates are just numbered consecutively
-				line:  len(result), // candidates are just numbered consecutively
+		if cfg.fuzzy != 0 && cfg.sort {
+			sort.Slice(sortedMatches, func(i, j int) bool {
+				info1 := sortedMatches[i]
+				info2 := sortedMatches[j]
+				return info1.match < info2.match ||
+					(info1.match == info2.match &&
+						groupsByGid[info1.original.gid].groupName <
+							groupsByGid[info2.original.gid].groupName)
 			})
+			for _, ch := range sortedMatches {
+				fmt.Printf(cfg.format, ch.start, ch.line, 0, ch.match*100, escape(ch.chunk), grpNm)
+			}
+		}
+		printf(cfg.endFormat, grpNm)
+	}
+}
+
+func printf(str string, args ...interface{}) {
+	for {
+		i := strings.Index(str, "%")
+		if i == -1 || i == len(str)-1 {break}
+		if str[i+1] != '%' {
+			fmt.Printf(str, args...)
+			return
+		}
+		str = str[i+2:]
+	}
+	fmt.Print(str)
+}
+
+func escape(str string) string {
+	str = strconv.Quote(str)
+	return str[1 : len(str)-1]
+}
+
+func (cfg *lmdbConfigStruct) chunkInfo(str []rune, hits map[uint64]*chunk, matches map[uint64]float64) []*chunkInfo {
+	var result []*chunkInfo
+	for oid, chunk := range hits {
+		var start, lineNo uint64
+		info := &chunkInfo{oid: oid, match: matches[oid], original: chunk}
+		result = append(result, info)
+		if cfg.candidates {
+			info.start = len(result) // candidates are just numbered consecutively
+			info.line = len(result)  // candidates are just numbered consecutively
 			if cfg.dataHex {
-				result[len(result)-1].chunk = hex.EncodeToString(data)
+				info.chunk = hex.EncodeToString(chunk.data)
 			} else {
-				result[len(result)-1].chunk = escape(string(data))
+				info.chunk = escape(string(chunk.data))
 			}
 		} else {
+			data := chunk.data
 			lineNo, data = getNumOrPanic(data)
 			start, data = getNumOrPanic(data)
 			len, _ := getNumOrPanic(data)
-			result = append(result, &chunkInfo{
-				line:  int(lineNo),
-				start: int(start),
-				chunk: escape(string(str[start : start+len])),
-			})
+			info.line = int(lineNo)
+			info.start = int(start)
+			info.chunk = string(str[start : start+len])
 		}
 		if len(result) >= cfg.limit {break}
 	}
 	if !cfg.candidates { // need to sort and adjust results
-		sort.Slice(result, func(i, j int) bool {
-			return result[i].start < result[j].start
-		})
+		if cfg.fuzzy == 0 {
+			sort.Slice(result, func(i, j int) bool {
+				return result[i].start < result[j].start
+			})
+		} else if !cfg.sort { // -fuzzy -sort sorts ALL matches, not just within groups
+			sort.Slice(result, func(i, j int) bool { // best match first
+				return result[i].match > result[j].match
+			})
+		}
 	}
 	return result
 }
@@ -1204,7 +1266,7 @@ func (cfg *lmdbConfigStruct) intersectGrams(inputGrams map[gram]struct{}) map[ui
 	return results
 }
 
-func (cfg *lmdbConfigStruct) fuzzyMatch(inputGrams map[gram]struct{}) map[uint64]struct{} {
+func (cfg *lmdbConfigStruct) fuzzyMatch(inputGrams map[gram]struct{}, matches map[uint64]float64) map[uint64]struct{} {
 	occurances := map[uint64]int{}
 	for grm := range inputGrams {
 		oids := cfg.getGram(grm)
@@ -1220,6 +1282,7 @@ func (cfg *lmdbConfigStruct) fuzzyMatch(inputGrams map[gram]struct{}) map[uint64
 	for oid, count := range occurances {
 		if float64(count)/l >= cfg.fuzzy {
 			results[oid] = member
+			matches[oid] = float64(count) / l
 		}
 	}
 	return results

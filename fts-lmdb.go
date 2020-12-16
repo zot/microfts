@@ -523,7 +523,7 @@ func (cfg *lmdbConfigStruct) indexOrg(group string) {
 	runeOffset := 0
 	prev := 0
 	forParts(str, func(line, typ, start, end int) {
-		g := grams(str[start:end], false)
+		g := grams(false, str[start:end])
 		if len(g) > 0 {
 			runeOffset += len([]rune(str[prev:start]))
 			runeLen := len([]rune(str[start:end]))
@@ -560,7 +560,7 @@ func (cfg *lmdbConfigStruct) indexLines(group string) {
 		runeOffset += len(runes)
 		cfg.data = buf.bytes
 		oid, d := cfg.initChunk() // make chunk for line
-		for grm := range grams(line, false) {
+		for grm := range grams(false, line) {
 			cfg.addGramEntry(grm, oid, d)
 		}
 		cfg.putChunk(oid, d)
@@ -839,7 +839,8 @@ func cmdGrams(cfg *lmdbConfigStruct) {
 		usage()
 	}
 	first := true
-	for grm := range grams(cfg.db, cfg.partial) { // db is actually the phrase
+	args := []string{cfg.db}
+	for grm := range grams(cfg.partial, append(args, cfg.args...)...) { // db is actually the phrase
 		if first {
 			first = false
 		} else {
@@ -1019,6 +1020,9 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		cmdUpdate(cfg)
 		cfg.args = args
 	}
+	if cfg.fuzzy != 0 {
+		cfg.partial = true
+	}
 	var inputGrams map[gram]struct{}
 	if cfg.candidates && cfg.grams {
 		inputGrams = make(map[gram]struct{})
@@ -1026,7 +1030,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			inputGrams[cfg.gramFor(grm)] = member
 		}
 	} else {
-		inputGrams = grams(strings.Join(cfg.args, " "), cfg.partial)
+		inputGrams = grams(cfg.partial, cfg.args...)
 	}
 	if len(inputGrams) == 0 {
 		os.Exit(1)
@@ -1044,7 +1048,6 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		var results map[uint64]struct{}
 		if cfg.fuzzy != 0 {
 			cfg.fuzzy /= 100
-			cfg.partial = true
 			results = cfg.fuzzyMatch(inputGrams, fuzzyMatches)
 		} else {
 			results = cfg.intersectGrams(inputGrams)
@@ -1119,9 +1122,9 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				sortedMatches = append(sortedMatches, ch)
 				continue
 			}
-			match := -1
+			firstMatch := -1
 			if cfg.fuzzy != 0.0 {
-				match = 0
+				firstMatch = 0
 			}
 			if !cfg.candidates && cfg.fuzzy == 0 { // check if chunk matches and skip if it doesn't
 			args:
@@ -1132,8 +1135,8 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 						if i == -1 {break}
 						if cfg.partial || ((i == 0 || !isGramChar(testChunk[i-1])) &&
 							(i+len(arg) == len(testChunk) || !isGramChar(testChunk[i+len(arg)]))) {
-							if match == -1 {
-								match = i
+							if firstMatch == -1 {
+								firstMatch = i
 							}
 							continue args // found a hit for this arg
 						}
@@ -1152,7 +1155,7 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 				if len(chunk) > 0 && chunk[len(chunk)-1] == '\n' {
 					chunk = chunk[:len(chunk)-1]
 				}
-				fmt.Printf(cfg.format, ch.start, ch.line, len([]rune(ch.chunk[:match])), ch.match*100, escape(ch.chunk), grpNm)
+				fmt.Printf(cfg.format, ch.start, ch.line, len([]rune(ch.chunk[:firstMatch])), ch.match*100, escape(ch.chunk), grpNm)
 			}
 		}
 		if cfg.fuzzy != 0 && cfg.sort {

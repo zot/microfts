@@ -205,9 +205,20 @@ func check(err error) {
 }
 
 // 3 digits in base 37 fits into two bytes
-func grams(str string, partial bool) map[gram]struct{} {
-	str = str + " "
-	result := make(map[gram]struct{})
+func grams(partial bool, args ...string) map[gram]struct{} {
+	result := map[gram]struct{}{}
+	if partial {
+		for _, term := range args {
+			addGrams(true, term, result)
+		}
+	} else {
+		addGrams(false, " "+strings.Join(args, " ")+" ", result)
+	}
+	return result
+}
+
+// 3 digits in base 37 fits into two bytes
+func addGrams(partial bool, str string, result map[gram]struct{}) {
 	var grm gram
 	for _, c := range str {
 		v := gramForChar(c)
@@ -222,7 +233,6 @@ func grams(str string, partial bool) map[gram]struct{} {
 			result[grm] = member
 		}
 	}
-	return result
 }
 
 func gramString(grm gram) string {

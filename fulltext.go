@@ -318,6 +318,7 @@ OFFSET is the 0-based offset of the first match in the chunk`)
 	flag.BoolVar(&lmdbConfig.groups, "groups", false, "info: display information for each group")
 	flag.StringVar(&lmdbConfig.filter, "filter", "", "search: filter results that match REGEXP")
 	flag.BoolVar(&lmdbConfig.chunks, "chunks", false, "info DB GROUP: display all of a group's chunks")
+	flag.BoolVar(&lmdbConfig.file, "file", false, "search: display files rather than chunks")
 	flag.BoolVar(&lmdbConfig.sort, "sort", false, `search -fuzzy: sort all matches
 This ignores start-format and end-format because it sorts all matches, regardless of
 which file they come from.`)

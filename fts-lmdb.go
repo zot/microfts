@@ -54,8 +54,8 @@ const (
 	maxInt          = int(^uint(0) >> 1)
 	null64          = 0xFFFFFFFFFFFFFFFF
 	groupStart      = ""
-	lineFormat      = "%[6]s:%[1]d:%[5]s\n"
-	fuzzyLineFormat = "%[6]s:%[1]d:%4.1[4]f%%:%[5]s\n"
+	lineFormat      = "%[6]s:%[2]d:%[5]s\n"
+	fuzzyLineFormat = "%[6]s:%[2]d:%4.1[4]f%%:%[5]s\n"
 	groupEnd        = ""
 	sexpGroupStart  = ""
 	infoSexpFormat  = "(:filename \"%[6]s\" :line %[2]d :offset %[3]d :text \"%[5]s\")\n"
@@ -142,6 +142,7 @@ type lmdbConfigStruct struct {
 	grams       bool
 	groups      bool
 	filter      string
+	file        bool
 	chunks      bool
 	candidates  bool
 	separate    bool
@@ -154,6 +155,20 @@ type lmdbConfigStruct struct {
 	startFormat string
 	endFormat   string
 	sort        bool
+}
+
+type searchContext struct {
+	cfg           *lmdbConfigStruct
+	groups        []string
+	groupStructs  map[string]*groupStruct
+	gids          map[string]uint64
+	hits          map[uint64]map[uint64]*chunk
+	badFiles      map[string]string
+	deletedGroups map[uint64]struct{}
+	groupsByGid   map[uint64]*groupStruct
+	fuzzyMatches  map[uint64]float64
+	reg           *regexp.Regexp
+	fileHits      map[string]struct{}
 }
 
 var lmdbConfig lmdbConfigStruct
@@ -1021,6 +1036,9 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 		cfg.args = args
 	}
 	if cfg.fuzzy != 0 {
+		if cfg.file {
+			exitError("Error in search options: -file -fuzzy not supported", ERROR)
+		}
 		cfg.partial = true
 	}
 	var inputGrams map[gram]struct{}
@@ -1035,87 +1053,109 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 	if len(inputGrams) == 0 {
 		os.Exit(1)
 	}
-	cfg.open(false)
-	defer cfg.env.Close()
-	hits := make(map[uint64]map[uint64]*chunk)
-	groups := make([]string, 0, 16)
-	groupsByGid := map[uint64]*groupStruct{}
-	gids := make(map[string]uint64)
-	groupStructs := map[string]*groupStruct{}
-	deletedGroups := map[uint64]struct{}{}
-	fuzzyMatches := map[uint64]float64{}
-	cfg.view(func() {
-		var results map[uint64]struct{}
-		if cfg.fuzzy != 0 {
-			cfg.fuzzy /= 100
-			results = cfg.fuzzyMatch(inputGrams, fuzzyMatches)
-		} else {
-			results = cfg.intersectGrams(inputGrams)
-		}
-		for oid := range results {
-			d := cfg.getChunk(cfg.oidKey(oid))
-			if hits[d.gid] == nil {
-				hits[d.gid] = make(map[uint64]*chunk)
-			}
-			hits[d.gid][oid] = d
-		}
-		for gid := range hits {
-			group := cfg.getGroupWithGid(gid)
-			if group.validity != valid {continue}
-			if group != nil && group.validity != deleted {
-				gids[group.groupName] = gid
-				groups = append(groups, group.groupName)
-				groupStructs[group.groupName] = group
-				groupsByGid[gid] = group
-			} else {
-				deletedGroups[gid] = member
-			}
-		}
-	})
-	sort.Strings(groups)
-	badFiles := map[string]string{}
-	bad := func(msg string, group string) {
-		delete(hits, gids[group])
-		delete(gids, group)
-		delete(groupStructs, group)
-		badFiles[group] = fmt.Sprintf(msg, group)
+	search := cfg.newSearchContext()
+	search.findCandidates(inputGrams)
+	search.findBadFiles()
+	search.displayResults()
+}
+
+func (cfg *lmdbConfigStruct) newSearchContext() *searchContext {
+	ctx := &searchContext{
+		cfg:           cfg,
+		groupStructs:  make(map[string]*groupStruct),
+		gids:          make(map[string]uint64),
+		hits:          make(map[uint64]map[uint64]*chunk),
+		badFiles:      make(map[string]string),
+		deletedGroups: make(map[uint64]struct{}),
+		groupsByGid:   make(map[uint64]*groupStruct),
+		fuzzyMatches:  make(map[uint64]float64),
 	}
-	for _, group := range groups {
-		if _, deleted := deletedGroups[gids[group]]; deleted {continue}
+	if cfg.filter != "" {
+		reg, err := regexp.Compile(cfg.filter)
+		check(err)
+		ctx.reg = reg
+	}
+	return ctx
+}
+
+func (search *searchContext) bad(msg string, group string) {
+	delete(search.hits, search.gids[group])
+	delete(search.gids, group)
+	delete(search.groupStructs, group)
+	search.badFiles[group] = fmt.Sprintf(msg, group)
+}
+
+func (search *searchContext) findBadFiles() {
+	search.badFiles = map[string]string{}
+	for _, group := range search.groups {
+		if _, deleted := search.deletedGroups[search.gids[group]]; deleted {continue}
 		stat, err := os.Stat(group)
-		if err != nil && cfg.force {
-			bad("Skipping '%s' because it is missing", group)
+		if err != nil && search.cfg.force {
+			search.bad("Skipping '%s' because it is missing", group)
 		} else if err != nil {
 			exitError("Could not read file "+group, ERROR_FILE_UNREADABLE)
-		} else if stat.ModTime().After(groupStructs[group].lastChanged) {
-			if cfg.force {
-				bad("Skipping '%s' because it has changed", group)
+		} else if stat.ModTime().After(search.groupStructs[group].lastChanged) {
+			if search.cfg.force {
+				search.bad("Skipping '%s' because it has changed", group)
 			} else {
 				exitError(fmt.Sprintf("File has changed since indexing: %s", group), ERROR_FILE_CHANGED)
 			}
 		}
 	}
-	var reg *regexp.Regexp
-	if cfg.filter != "" {
-		var err error
-		reg, err = regexp.Compile(cfg.filter)
-		check(err)
-	}
+}
+
+func (search *searchContext) findCandidates(inputGrams map[gram]struct{}) {
+	cfg := search.cfg
+	cfg.open(false)
+	defer cfg.env.Close()
+	cfg.view(func() {
+		var results map[uint64]struct{}
+		if cfg.fuzzy != 0 {
+			cfg.fuzzy /= 100
+			results = cfg.fuzzyMatch(inputGrams, search.fuzzyMatches)
+		} else {
+			results = cfg.intersectGrams(inputGrams)
+		}
+		for oid := range results {
+			d := cfg.getChunk(cfg.oidKey(oid))
+			if search.hits[d.gid] == nil {
+				search.hits[d.gid] = make(map[uint64]*chunk)
+			}
+			search.hits[d.gid][oid] = d
+		}
+		for gid := range search.hits {
+			group := cfg.getGroupWithGid(gid)
+			if group.validity != valid {continue}
+			if group != nil && group.validity != deleted {
+				search.gids[group.groupName] = gid
+				search.groups = append(search.groups, group.groupName)
+				search.groupStructs[group.groupName] = group
+				search.groupsByGid[gid] = group
+			} else {
+				search.deletedGroups[gid] = member
+			}
+		}
+	})
+	sort.Strings(search.groups)
+}
+
+func (search *searchContext) displayResults() {
+	cfg := search.cfg
 	var sortedMatches []*chunkInfo
-	for _, grpNm := range groups {
-		if _, deleted := deletedGroups[gids[grpNm]]; deleted {continue}
-		if msg, isBad := badFiles[grpNm]; isBad {
+group:
+	for _, grpNm := range search.groups {
+		if _, deleted := search.deletedGroups[search.gids[grpNm]]; deleted {continue}
+		if msg, isBad := search.badFiles[grpNm]; isBad {
 			fmt.Fprintln(os.Stderr, msg)
 			continue
 		}
-		contents, err := ioutil.ReadFile(grpNm)
-		if os.IsExist(err) {
-			exitError(fmt.Sprintf("File does not exist: %s", grpNm), ERROR_FILE_MISSING)
-		} else if err != nil {
-			exitError(fmt.Sprintf("Could not read file: %s", grpNm), ERROR_FILE_UNREADABLE)
-		}
-		chunks := cfg.chunkInfo([]rune(string(contents)), hits[gids[grpNm]], fuzzyMatches)
+		chunks := search.getChunks(grpNm)
 		printf(cfg.startFormat, grpNm)
+		var fileChunk *chunkInfo
+		fileOffset := 0
+		if cfg.file {
+			search.fileHits = make(map[string]struct{})
+		}
 	eachChunk:
 		for _, ch := range chunks {
 			if cfg.fuzzy != 0 && cfg.sort {
@@ -1129,6 +1169,9 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 			if !cfg.candidates && cfg.fuzzy == 0 { // check if chunk matches and skip if it doesn't
 			args:
 				for _, arg := range cfg.args {
+					if cfg.file {
+						if _, seen := search.fileHits[arg]; seen {continue}
+					}
 					testChunk := strings.ToLower(ch.chunk)
 					for len(testChunk) > 0 {
 						i := strings.Index(testChunk, strings.ToLower(arg))
@@ -1138,6 +1181,13 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 							if firstMatch == -1 {
 								firstMatch = i
 							}
+							if cfg.file {
+								search.fileHits[arg] = member
+								if fileChunk == nil {
+									fileChunk = ch
+									fileOffset = i
+								}
+							}
 							continue args // found a hit for this arg
 						}
 						testChunk = testChunk[len(arg):]
@@ -1145,55 +1195,35 @@ func cmdSearch(cfg *lmdbConfigStruct) {
 					continue eachChunk // if it made it to here, the arg isn't in the line
 				}
 				if cfg.filter != "" {
-					if !reg.Match([]byte(ch.chunk)) {continue}
+					if !search.reg.Match([]byte(ch.chunk)) {continue}
 				}
 			}
-			if cfg.numbers {
-				fmt.Printf("%s:%d\n", grpNm, ch.line)
-			} else if cfg.fuzzy == 0 || !cfg.sort {
-				chunk := ch.chunk
-				if len(chunk) > 0 && chunk[len(chunk)-1] == '\n' {
-					chunk = chunk[:len(chunk)-1]
+			if cfg.file {
+				if len(search.fileHits) == len(cfg.args) {
+					search.displayChunk(grpNm, fileChunk, fileOffset)
+					continue group
 				}
-				fmt.Printf(cfg.format, ch.start, ch.line, len([]rune(ch.chunk[:firstMatch])), ch.match*100, escape(ch.chunk), grpNm)
+			} else {
+				search.displayChunk(grpNm, ch, firstMatch)
 			}
 		}
-		if cfg.fuzzy != 0 && cfg.sort {
-			sort.Slice(sortedMatches, func(i, j int) bool {
-				info1 := sortedMatches[i]
-				info2 := sortedMatches[j]
-				return info1.match < info2.match ||
-					(info1.match == info2.match &&
-						groupsByGid[info1.original.gid].groupName <
-							groupsByGid[info2.original.gid].groupName)
-			})
-			for _, ch := range sortedMatches {
-				fmt.Printf(cfg.format, ch.start, ch.line, 0, ch.match*100, escape(ch.chunk), grpNm)
-			}
-		}
+		search.sortFuzzy(grpNm, sortedMatches)
 		printf(cfg.endFormat, grpNm)
 	}
 }
 
-func printf(str string, args ...interface{}) {
-	for {
-		i := strings.Index(str, "%")
-		if i == -1 || i == len(str)-1 {break}
-		if str[i+1] != '%' {
-			fmt.Printf(str, args...)
-			return
-		}
-		str = str[i+2:]
+func (search *searchContext) getChunks(grpNm string) []*chunkInfo {
+	contents, err := ioutil.ReadFile(grpNm)
+	if os.IsExist(err) {
+		exitError(fmt.Sprintf("File does not exist: %s", grpNm), ERROR_FILE_MISSING)
+	} else if err != nil {
+		exitError(fmt.Sprintf("Could not read file: %s", grpNm), ERROR_FILE_UNREADABLE)
 	}
-	fmt.Print(str)
+	return search.chunkInfo([]rune(string(contents)), search.hits[search.gids[grpNm]], search.fuzzyMatches)
 }
 
-func escape(str string) string {
-	str = strconv.Quote(str)
-	return str[1 : len(str)-1]
-}
-
-func (cfg *lmdbConfigStruct) chunkInfo(str []rune, hits map[uint64]*chunk, matches map[uint64]float64) []*chunkInfo {
+func (search *searchContext) chunkInfo(str []rune, hits map[uint64]*chunk, matches map[uint64]float64) []*chunkInfo {
+	cfg := search.cfg
 	var result []*chunkInfo
 	for oid, chunk := range hits {
 		var start, lineNo uint64
@@ -1230,6 +1260,54 @@ func (cfg *lmdbConfigStruct) chunkInfo(str []rune, hits map[uint64]*chunk, match
 		}
 	}
 	return result
+}
+
+func (search *searchContext) displayChunk(grpNm string, ch *chunkInfo, firstMatch int) {
+	cfg := search.cfg
+	if cfg.numbers {
+		fmt.Printf("%s:%d\n", grpNm, ch.line)
+	} else if cfg.fuzzy == 0 || !cfg.sort {
+		chunk := ch.chunk
+		if len(chunk) > 0 && chunk[len(chunk)-1] == '\n' {
+			chunk = chunk[:len(chunk)-1]
+		}
+		fmt.Printf(cfg.format, ch.start, ch.line, len([]rune(ch.chunk[:firstMatch])), ch.match*100, escape(chunk), grpNm)
+	}
+}
+
+func (search *searchContext) sortFuzzy(groupName string, sortedMatches []*chunkInfo) {
+	cfg := search.cfg
+	if cfg.fuzzy != 0 && cfg.sort {
+		sort.Slice(sortedMatches, func(i, j int) bool {
+			info1 := sortedMatches[i]
+			info2 := sortedMatches[j]
+			return info1.match < info2.match ||
+				(info1.match == info2.match &&
+					search.groupsByGid[info1.original.gid].groupName <
+						search.groupsByGid[info2.original.gid].groupName)
+		})
+		for _, ch := range sortedMatches {
+			fmt.Printf(cfg.format, ch.start, ch.line, 0, ch.match*100, escape(ch.chunk), groupName)
+		}
+	}
+}
+
+func printf(str string, args ...interface{}) {
+	for {
+		i := strings.Index(str, "%")
+		if i == -1 || i == len(str)-1 {break}
+		if str[i+1] != '%' {
+			fmt.Printf(str, args...)
+			return
+		}
+		str = str[i+2:]
+	}
+	fmt.Print(str)
+}
+
+func escape(str string) string {
+	str = strconv.Quote(str)
+	return str[1 : len(str)-1]
 }
 
 func isGramChar(c byte) bool {

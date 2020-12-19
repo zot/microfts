@@ -1,0 +1,57 @@
+#+TITLE: FTS with LMDB
+* Documents
+** Can be very small -- org entries
+** tagged object architecture
+** tags can represent numeric grams
+* Numbers -- lexicographically ordered
+| 7 bits  | 0                   - 127                  | 0xxxxxxx                 |
+| 12 bits | 128                 - 4095                 | 1000xxxx X               |
+| 20 bits | 4096                - 1048575              | 1001xxxx X X             |
+| 28 bits | 1048576             - 268435455            | 1010xxxx X X X           |
+| 36 bits | 268435456           - 68719476735          | 1011xxxx X X X X         |
+| 44 bits | 68719476736         - 17592186044415       | 1100xxxx X X X X X       |
+| 52 bits | 17592186044416      - 4503599627370495     | 1101xxxx X X X X X X     |
+| 60 bits | 4503599627370496    - 1152921504606846975  | 1110xxxx X X X X X X X   |
+| 64 bits | 1152921504606846976 - 18446744073709551615 | 1111---- X X X X X X X X |
+* Trees
+** Grams: GRAM-> BLOCK
+GRAM is a 2-byte value
+|----------|
+| OID LIST |
+|----------|
+** Gram 0 holds the info since 0 is not a legal gram
+|--------------------|
+| next unused oid    |
+| start of free list |
+| group name ...     |
+|--------------------|
+** Docs: OID -> BLOCK
+OIDS are compressed integers
+
+Doc entries are <first tag Y, data>
+first tag Y is the start of the threaded tag list
+data is arbitrary data for the object
+|-------------------------|
+| GID                     |
+| data (e.g. line number) |
+| totalGrams              |
+|-------------------------|
+** Groups: GID -> BLOCK
+Used for bookkeeping, to be able to remove documents
+|----------|
+| NAME     |
+|----------|
+** Group Names: NAME->GID
+** OID LISTS
+|---------------|
+| # 1-byte OIDS |
+| # 2-byte OIDS |
+| # 3-byte OIDS |
+| # 4-byte OIDS |
+| # 5-byte OIDS |
+| # 6-byte OIDS |
+| # 7-byte OIDS |
+| # 8-byte OIDS |
+| # 9-byte OIDS |
+| OIDS          |
+|---------------|

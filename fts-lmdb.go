@@ -546,6 +546,8 @@ func (cfg *lmdbConfigStruct) indexOrg(group string) {
 			buf.putNum(uint64(line))
 			buf.putNum(uint64(runeOffset))
 			buf.putNum(uint64(runeLen))
+			buf.putNum(uint64(start))
+			buf.putNum(uint64(end - start))
 			runeOffset += runeLen
 			prev = end
 			cfg.data = buf.bytes
@@ -572,6 +574,8 @@ func (cfg *lmdbConfigStruct) indexLines(group string) {
 		buf.putNum(uint64(lineNo))
 		buf.putNum(uint64(runeOffset))
 		buf.putNum(uint64(len(runes)))
+		buf.putNum(uint64(pos))
+		buf.putNum(uint64(len(line)))
 		runeOffset += len(runes)
 		cfg.data = buf.bytes
 		oid, d := cfg.initChunk() // make chunk for line
@@ -1142,6 +1146,10 @@ func (search *searchContext) findCandidates(inputGrams map[gram]struct{}) {
 func (search *searchContext) displayResults() {
 	cfg := search.cfg
 	var sortedMatches []*chunkInfo
+	lowerArgs := make([]string, len(cfg.args))
+	for i, arg := range cfg.args {
+		lowerArgs[i] = strings.ToLower(arg)
+	}
 group:
 	for _, grpNm := range search.groups {
 		if _, deleted := search.deletedGroups[search.gids[grpNm]]; deleted {continue}
@@ -1167,14 +1175,14 @@ group:
 				firstMatch = 0
 			}
 			if !cfg.candidates && cfg.fuzzy == 0 { // check if chunk matches and skip if it doesn't
+				testChunk := strings.ToLower(ch.chunk)
 			args:
-				for _, arg := range cfg.args {
+				for _, arg := range lowerArgs {
 					if cfg.file {
 						if _, seen := search.fileHits[arg]; seen {continue}
 					}
-					testChunk := strings.ToLower(ch.chunk)
 					for len(testChunk) > 0 {
-						i := strings.Index(testChunk, strings.ToLower(arg))
+						i := strings.Index(testChunk, arg)
 						if i == -1 {break}
 						if cfg.partial || ((i == 0 || !isGramChar(testChunk[i-1])) &&
 							(i+len(arg) == len(testChunk) || !isGramChar(testChunk[i+len(arg)]))) {
@@ -1219,10 +1227,11 @@ func (search *searchContext) getChunks(grpNm string) []*chunkInfo {
 	} else if err != nil {
 		exitError(fmt.Sprintf("Could not read file: %s", grpNm), ERROR_FILE_UNREADABLE)
 	}
-	return search.chunkInfo([]rune(string(contents)), search.hits[search.gids[grpNm]], search.fuzzyMatches)
+	str := string(contents)
+	return search.chunkInfo(str, search.hits[search.gids[grpNm]], search.fuzzyMatches)
 }
 
-func (search *searchContext) chunkInfo(str []rune, hits map[uint64]*chunk, matches map[uint64]float64) []*chunkInfo {
+func (search *searchContext) chunkInfo(str string, hits map[uint64]*chunk, matches map[uint64]float64) []*chunkInfo {
 	cfg := search.cfg
 	var result []*chunkInfo
 	for oid, chunk := range hits {
@@ -1241,10 +1250,12 @@ func (search *searchContext) chunkInfo(str []rune, hits map[uint64]*chunk, match
 			data := chunk.data
 			lineNo, data = getNumOrPanic(data)
 			start, data = getNumOrPanic(data)
-			len, _ := getNumOrPanic(data)
+			_, data = getNumOrPanic(data)
+			strStart, data := getNumOrPanic(data)
+			strLen, _ := getNumOrPanic(data)
 			info.line = int(lineNo)
 			info.start = int(start)
-			info.chunk = string(str[start : start+len])
+			info.chunk = string(str[strStart : strStart+strLen])
 		}
 		if len(result) >= cfg.limit {break}
 	}

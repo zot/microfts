@@ -6,9 +6,11 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'org)
+(require 'ivy)
 
 (defgroup org-fts ()
-  "Customization for org-fts")
+  "Customization for org-fts"
+  :group 'org)
 
 (defcustom org-fts/program "microfts"
   "Name or path for microfts program"
@@ -67,8 +69,7 @@
 (defun org-fts/microfts-search (termStr)
   (let ((terms (condition-case nil (split-string-and-unquote termStr) ((debug error) nil))))
     (when (and (org-fts/test terms "EMPTY TERMS") (org-fts/check-db))
-      (save-excursion
-        (set-buffer (get-buffer-create "org-search"))
+      (with-current-buffer (get-buffer-create "org-search")
         (erase-buffer)
         (let ((ret (apply #'call-process org-fts/program nil "org-search" nil
                           `("search" "-sexp" ,@org-fts/search-args ,org-fts/db ,@terms))))

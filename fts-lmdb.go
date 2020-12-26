@@ -415,6 +415,7 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 }
 
 func printGroupInfo(group *groupStruct) bool {
+	if group == nil {return false}
 	valid := false
 	fmt.Printf("%s", group.groupName)
 	if group.org {

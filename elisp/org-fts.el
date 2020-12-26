@@ -48,23 +48,27 @@
         nil)))
 
 (defun org-fts/hook ()
-  "An org file was just saved, index/reindex it"
-  (message "ORG-FTS: %s input %s %s" org-fts/program org-fts/db (file-truename (buffer-file-name)))
+  "A file was just saved, index/reindex it if it's an org-mode file"
   (when (and
          (buffer-file-name)
-	     (or (f-ext? (buffer-file-name) "org")
-             (f-ext? (buffer-file-name) "org_archive"))
+	     (equal major-mode 'org-mode)
          (org-fts/check-db))
+    (message "UPDATING ORG-FTS: %s" (file-truename (buffer-file-name)))
     (start-process "org-fts" nil org-fts/program
                    "input" "-org" org-fts/db (file-truename (buffer-file-name)))))
 
-(add-hook 'org-mode-hook 'org-fts/hook)
+(add-hook 'after-save-hook 'org-fts/hook)
 
 (defun org-fts/idle-task ()
   "After a certain amount of idle time, update the org-fts database"
   (when (org-fts/check-db)
-    (start-process "org-fts" nil org-fts/program
-                   "update" org-fts/db)))
+    (let ((process (start-process "org-fts" nil org-fts/program
+                                  "update" org-fts/db)))
+      (set-process-sentinel process
+                            (lambda (process status)
+                              (when (equal status "finished\n")
+                                (start-process "org-fts" nil org-fts/program
+                                               "compact" org-fts/db)))))))
 
 (defun org-fts/microfts-search (termStr)
   (let ((terms (condition-case nil (split-string-and-unquote termStr) ((debug error) nil))))

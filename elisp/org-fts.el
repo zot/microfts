@@ -123,3 +123,5 @@
               :dynamic-collection t
               :action 'org-fts/found
               :caller 'fts)))
+
+(provide 'org-fts)

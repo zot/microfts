@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	//"github.com/pkg/profile"
+
+	"github.com/pkg/profile"
 )
 
 const (
@@ -291,8 +292,8 @@ func main() {
 		usage()
 	}
 	flag.Usage = printUsage
-	//prof := false
-	//flag.BoolVar(&prof, "prof", false, "profile cpu")
+	prof := false
+	flag.BoolVar(&prof, "prof", false, "profile cpu")
 	flag.BoolVar(&diag, "v", false, "verbose")
 	flag.IntVar(&lmdbConfig.gramSize, "s", 0, "gram size")
 	flag.StringVar(&lmdbConfig.delimiter, "d", ",", "delimiter for unicode tags")
@@ -346,12 +347,14 @@ Not used with search -fuzzy -sort`)
 		"info: print gram coverage\n"+
 		"search: specify grams instead of search terms")
 	flag.CommandLine.Parse(os.Args[2:])
-	//if prof {
-	//	defer profile.Start().Stop()
-	//	//defer profile.Start(profile.MemProfile).Stop()
-	//	//defer profile.Start(profile.TraceProfile).Stop()
-	//}
-	if !runLmdb() {
+	if prof {
+		defer profile.Start().Stop()
+		//defer profile.Start(profile.MemProfile).Stop()
+		//defer profile.Start(profile.TraceProfile).Stop()
+		for i := 0; i < 1000; i++ {
+			runLmdb()
+		}
+	} else if !runLmdb() {
 		usage()
 	}
 }

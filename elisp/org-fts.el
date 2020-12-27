@@ -35,7 +35,7 @@
 (defconst org-fts/baseprogram
   (let ((entry (cadr (assoc 'org-fts package-alist)))
         (name (cdr (assoc system-type org-fts/baseprogram-alist))))
-    (and entry (format "%s/microfts" (package-desc-dir entry)))))
+    (and entry (format "%s/%s" (package-desc-dir entry) name))))
 
 (defcustom org-fts/program nil
   "Name or path for microfts program"
@@ -55,13 +55,14 @@
 (defvar org-fts/hits nil)
 (defvar org-fts/args nil)
 (defvar org-fts/timer (run-with-idle-timer (* 60 5) t 'org-fts/idle-task))
+(defvar org-fts/actual-program nil)
 
 (defun org-fts/check-db ()
   "create fts db if it is not there"
   (and (org-fts/test org-fts/db "need to customize org-fts/db, it has no value")
-       (org-fts/test org-fts/program "need to customize org-fts/program, it has no value")
+       (org-fts/ensure-binary)
        (or (file-exists-p org-fts/db)
-           (let ((ret (call-process org-fts/program nil nil nil
+           (let ((ret (call-process org-fts/actual-program nil nil nil
                                     "create" org-fts/db)))
              (org-fts/test (eql 0 ret) "creating database %s returned error %s" org-fts/db ret)))))
 
@@ -79,7 +80,7 @@
 	     (equal major-mode 'org-mode)
          (org-fts/check-db))
     (message "UPDATING ORG-FTS: %s" (file-truename (buffer-file-name)))
-    (start-process "org-fts" nil org-fts/program
+    (start-process "org-fts" nil org-fts/actual-program
                    "input" "-org" org-fts/db (file-truename (buffer-file-name)))))
 
 (add-hook 'after-save-hook 'org-fts/hook)
@@ -87,13 +88,13 @@
 (defun org-fts/idle-task ()
   "After a certain amount of idle time, update the org-fts database"
   (when (org-fts/check-db)
-    (let ((process (start-process "org-fts" nil org-fts/program
+    (let ((process (start-process "org-fts" nil org-fts/actual-program
                                   "update" org-fts/db)))
       (set-process-sentinel process
                             (lambda (process status)
                               (ignore process)
                               (when (equal status "finished\n")
-                                (start-process "org-fts" nil org-fts/program
+                                (start-process "org-fts" nil org-fts/actual-program
                                                "compact" org-fts/db)))))))
 
 (defun org-fts/microfts-search (termStr)
@@ -101,7 +102,7 @@
     (when (and (org-fts/test terms "EMPTY TERMS") (org-fts/check-db))
       (with-current-buffer (get-buffer-create "org-search")
         (erase-buffer)
-        (let ((ret (apply #'call-process org-fts/program nil "org-search" nil
+        (let ((ret (apply #'call-process org-fts/actual-program nil "org-search" nil
                           `("search" "-sexp" ,@org-fts/search-args ,org-fts/db ,@terms))))
           (if (not (eql ret 0))
               (progn
@@ -147,7 +148,7 @@
   "Perform an fts search"
   (interactive)
   (when (org-fts/check-db)
-    (call-process org-fts/program nil nil nil
+    (call-process org-fts/actual-program nil nil nil
                   "update" org-fts/db)
     (ivy-read "Org search: " 'org-fts/microfts-search
               :history 'org-fts/history
@@ -157,33 +158,37 @@
 
 (defun org-fts/ensure-binary ()
   "Make sure microfts is present"
-  (or
-   (and org-fts/program
-        (or (file-exists-p org-fts/program)
-            (error "Program not found: %s" org-fts/program))
-        (or (file-executable-p org-fts/program)
-            (error "Program exists but is not executable: %s" org-fts/program)))
-   (and (file-exists-p org-fts/baseprogram)
-        (or (file-executable-p org-fts/baseprogram)
-            (error "Program exists but is not executable: %s" org-fts/baseprogram)))
-   ;; if baseprogram is not there, download it
-   (let* ((url (assoc system-type org-fts/microfts-url-alist))
-          (comprfile (format "%s.gz" org-fts/baseprogram))
-          (compr auto-compression-mode))
-     (when (not org-fts/baseprogram) (error "No value for org-fts/baseprogram"))
-     (when (not url) (error "Unsupported system type: %s" system-type))
-     (url-copy-file org-fts/microfts-url comprfile t)
-     (save-excursion
-       (unwind-protect
-           (progn
-             (if compr (auto-compression-mode -1))
-             (find-file-literally comprfile)
-             (zlib-decompress-region (point-min) (point-max))
-             (write-file comprfile)
-             (executable-chmod)
-             (rename-file comprfile org-fts/baseprogram)
-             (kill-buffer))
-         (if compr (auto-compression-mode 1)))))))
+  (setq org-fts/actual-program
+        (or
+         (and org-fts/program
+              (or (file-exists-p org-fts/program)
+                  (error "Program not found: %s" org-fts/program))
+              (or (file-executable-p org-fts/program)
+                  (error "Program exists but is not executable: %s" org-fts/program))
+              org-fts/program)
+         (and (file-exists-p org-fts/baseprogram)
+              (or (file-executable-p org-fts/baseprogram)
+                  (error "Program exists but is not executable: %s" org-fts/baseprogram))
+              org-fts/baseprogram)
+         ;; if baseprogram is not there, download it
+         (let* ((url (cdr (assoc system-type org-fts/microfts-url-alist)))
+                (comprfile (format "%s.gz" org-fts/baseprogram))
+                (compr auto-compression-mode))
+           (when (not org-fts/baseprogram) (error "No value for org-fts/baseprogram or org-fts/program"))
+           (when (not url) (error "Unsupported system type: %s" system-type))
+           (url-copy-file url comprfile t)
+           (save-excursion
+             (unwind-protect
+                 (progn
+                   (if compr (auto-compression-mode -1))
+                   (find-file-literally comprfile)
+                   (zlib-decompress-region (point-min) (point-max))
+                   (write-file comprfile)
+                   (executable-chmod)
+                   (rename-file comprfile org-fts/baseprogram)
+                   (kill-buffer)
+                   org-fts/baseprogram)
+               (if compr (auto-compression-mode 1))))))))
 
 (provide 'org-fts)
 

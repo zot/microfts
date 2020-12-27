@@ -1,10 +1,18 @@
-;;;;;
-;; org-fts.el
-;; (c) 2020 by Bill Burdick
-;; Shared under MIT license
-;;
+;;; org-fts.el --- Full text search for org files -*- lexical-binding: t; -*-
+
+;; (c) 2020 by Bill Burdick, shared under MIT license
+
+;; Author: Bill Burdick <bill.burdick@gmail.com>
+;; URL: https://github.com/zot/microfts/tree/main/elisp
+;; Version: 1.0.0
+;; Package-Requires: (cl cl-lib org ivy)
+;; Keywords: org convenience
+
+;;; Commentary:
+
+;;; Code:
+
 (require 'cl-lib)
-(require 'seq)
 (require 'org)
 (require 'ivy)
 
@@ -66,6 +74,7 @@
                                   "update" org-fts/db)))
       (set-process-sentinel process
                             (lambda (process status)
+                              (ignore process)
                               (when (equal status "finished\n")
                                 (start-process "org-fts" nil org-fts/program
                                                "compact" org-fts/db)))))))
@@ -92,6 +101,7 @@
               )))))))
 
 (defun org-fts/found (arg)
+  (ignore arg)
   (let ((hit (elt org-fts/hits ivy--index)))
     (find-file (plist-get hit :filename))
     (if (equal major-mode 'org-mode) (org-show-all))
@@ -106,9 +116,9 @@
          (lowLn (downcase line)))
     (add-text-properties 0 colon1 '(face ivy-grep-info) line)
     (add-text-properties (1+ colon1) colon2 '(face ivy-grep-line-number) line)
-    (do ((a 0 (incf a))) ((>= a (length org-fts/args)))
+    (cl-do ((a 0 (cl-incf a))) ((>= a (length org-fts/args)))
       (let* ((arg (downcase (elt org-fts/args a))))
-        (do ((i (cl-search arg lowLn :start2 text) (cl-search arg lowLn :start2 (+ i (length arg)))))
+        (cl-do ((i (cl-search arg lowLn :start2 text) (cl-search arg lowLn :start2 (+ i (length arg)))))
             ((not i))
           (put-text-property i (+ i (length arg)) 'face 'ivy-minibuffer-match-face-2 line))))
     line))
@@ -129,3 +139,5 @@
               :caller 'fts)))
 
 (provide 'org-fts)
+
+;;; org-fts.el ends here

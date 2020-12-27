@@ -1,4 +1,0 @@
-(org-fts
- :fetcher github
- :repo "zot/microfts"
- :files ("elisp/*.el" "elisp/README.org"))

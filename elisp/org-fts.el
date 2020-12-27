@@ -1,11 +1,11 @@
-;;; org-fts.el --- Full text search for org files -*- lexical-binding: t; -*-
+;;; org-fts.el --- Full text search for org files with ivy support -*- lexical-binding: t; -*-
 
 ;; (c) 2020 by Bill Burdick, shared under MIT license
 
 ;; Author: Bill Burdick <bill.burdick@gmail.com>
 ;; URL: https://github.com/zot/microfts/tree/main/elisp
 ;; Version: 1.0.0
-;; Package-Requires: (cl cl-lib org ivy)
+;; Package-Requires: (cl-lib org ivy package executable)
 ;; Keywords: org convenience
 
 ;;; Commentary:
@@ -15,12 +15,29 @@
 (require 'cl-lib)
 (require 'org)
 (require 'ivy)
+(require 'package)
+(require 'executable)
 
 (defgroup org-fts ()
   "Customization for org-fts"
   :group 'org)
 
-(defcustom org-fts/program "microfts"
+(defconst org-fts/microfts-url-alist 
+  '((gnu/linux . "https://github.com/zot/microfts/releases/download/v1.0.0/microfts-linux.gz")
+    (windows-nt . "https://github.com/zot/microfts/releases/download/v1.0.0/microfts-windows.gz")
+    (darwin . "https://github.com/zot/microfts/releases/download/v1.0.0/microfts-mac.gz")))
+
+(defconst org-fts/baseprogram-alist
+  '((gnu/linux . "microfts")
+    (darwin . "microfts")
+    (windows-nt . "microfts.exe")))
+
+(defconst org-fts/baseprogram
+  (let ((entry (cadr (assoc 'org-fts package-alist)))
+        (name (cdr (assoc system-type org-fts/baseprogram-alist))))
+    (and entry (format "%s/microfts" (package-desc-dir entry)))))
+
+(defcustom org-fts/program nil
   "Name or path for microfts program"
   :type 'string
   :group 'org-fts)
@@ -137,6 +154,36 @@
               :dynamic-collection t
               :action 'org-fts/found
               :caller 'fts)))
+
+(defun org-fts/ensure-binary ()
+  "Make sure microfts is present"
+  (or
+   (and org-fts/program
+        (or (file-exists-p org-fts/program)
+            (error "Program not found: %s" org-fts/program))
+        (or (file-executable-p org-fts/program)
+            (error "Program exists but is not executable: %s" org-fts/program)))
+   (and (file-exists-p org-fts/baseprogram)
+        (or (file-executable-p org-fts/baseprogram)
+            (error "Program exists but is not executable: %s" org-fts/baseprogram)))
+   ;; if baseprogram is not there, download it
+   (let* ((url (assoc system-type org-fts/microfts-url-alist))
+          (comprfile (format "%s.gz" org-fts/baseprogram))
+          (compr auto-compression-mode))
+     (when (not org-fts/baseprogram) (error "No value for org-fts/baseprogram"))
+     (when (not url) (error "Unsupported system type: %s" system-type))
+     (url-copy-file org-fts/microfts-url comprfile t)
+     (save-excursion
+       (unwind-protect
+           (progn
+             (if compr (auto-compression-mode -1))
+             (find-file-literally comprfile)
+             (zlib-decompress-region (point-min) (point-max))
+             (write-file comprfile)
+             (executable-chmod)
+             (rename-file comprfile org-fts/baseprogram)
+             (kill-buffer))
+         (if compr (auto-compression-mode 1)))))))
 
 (provide 'org-fts)
 

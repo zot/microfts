@@ -389,7 +389,7 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 					prev := 0
 					forParts(str, func(line, typ, start, end int) {
 						runeOffset += len([]rune(str[prev:start]))
-						fmt.Printf(cfg.format, runeOffset+1, line, 0, 0.0, escape(str[start:end]), cfg.groupName)
+						fmt.Printf(cfg.format, runeOffset+1, line, 0, 0.0, escape(str[start:end]), group.groupName)
 						prev = start
 					})
 				} else {

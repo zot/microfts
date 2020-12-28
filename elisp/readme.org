@@ -2,7 +2,7 @@
 * Usage
 Org-fts automatically indexes changed org files as you visit them and save them. If you delete or rename an org file, org-fts will lose track of it until you visit it again.
 
-Searching is based on microfts, which is fairly fast, (returning results in less than 10ms for around 3M of files). Full text indexing takes space, so expect the index to take maybe 2-5 times the space of your files.
+Searching is based on microfts, which is fairly fast, (returning results in less than 10ms for around 3M of files). Full text indexing takes space, so expect the index to take maybe 2-5 times the space of your files. Each keystroke in the screencast below does another full text search with microfts.
 
 This package provides two commands:
 - org-fts/search which starts an ivy search through all of the indexed org files. It is currently returns org elements (table, paragraph, headline, etc.) that match all the terms you type. If you prefer to see every file that contains all of the terms you type (like you would see in a web search), you can customize org-fts/search-args and add -file to it. This will show only one line per file.

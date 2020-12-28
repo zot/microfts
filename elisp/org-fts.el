@@ -33,9 +33,8 @@
     (windows-nt . "microfts.exe")))
 
 (defconst org-fts/baseprogram
-  (let ((entry (cadr (assoc 'org-fts package-alist)))
-        (name (cdr (assoc system-type org-fts/baseprogram-alist))))
-    (and entry (format "%s/%s" (package-desc-dir entry) name))))
+  (let ((name (cdr (assoc system-type org-fts/baseprogram-alist))))
+    (format "%s%s" user-emacs-directory name)))
 
 (defcustom org-fts/program nil
   "Name or path for microfts program"

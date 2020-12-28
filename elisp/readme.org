@@ -1,4 +1,6 @@
 #+TITLE:ORG-FTS, a full-text search for org files integrated with ivy
+* WARNING: This is pre-release code...
+I appreciate people trying this out and sending feedback to me via issues on [[https://github.com/zot/microfts][this repository]]!
 * Usage
 Org-fts automatically indexes changed org files as you visit them and save them. If you delete or rename an org file, org-fts will lose track of it until you visit it again.
 

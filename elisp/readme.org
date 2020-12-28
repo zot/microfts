@@ -11,7 +11,7 @@ This package provides two commands: =M-x org-fts/search= and =M-x org-fts/find-o
 ** *M-x org-fts/search*
 Starts an ivy search through all of the indexed org files. It is currently returns org elements (table, paragraph, headline, etc.) that match all the terms you type. If you prefer to see every file that contains all of the terms you type (like you would see in a web search), you can customize org-fts/search-args and add -file to it. This will show only one line per file.
 
-You can quote terms like in a web search: ="this is" a test=
+You can quote terms like in a web search: =this "is a" test=
 ** *M-x org-fts/find-org-file*
 Lets you pick one of the known org files
 * Screencast

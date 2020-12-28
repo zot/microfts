@@ -140,6 +140,7 @@
     (goto-char (1+ (plist-get hit :char-offset)))))
 
 (defvar org-fts/history nil)
+(defvar org-fts/file-history nil)
 
 (defun org-fts/display (line)
   (let* ((colon1 (cl-search ":" line))
@@ -169,6 +170,23 @@
               :dynamic-collection t
               :action 'org-fts/found
               :caller 'fts)))
+
+(defun org-fts/find-org-file ()
+  "Find one of your org files"
+  (interactive)
+  (when (org-fts/check-db)
+    (with-current-buffer (get-buffer-create "org-fts")
+      (erase-buffer)
+      (call-process org-fts/actual-program nil "org-fts" nil
+                    "info" "-groups" org-fts/db)
+      (goto-char (point-min))
+      (perform-replace " *\\(org-mode\\)?\\( DELETED\\| NOT AVAILABLE\\| CHANGED\\)?$" "" nil t nil)
+      (let ((files (seq-filter (lambda (x) (> (length x) 0)) (split-string (buffer-string) "\n"))))
+        (ivy-read "Find org file: " (seq-sort (lambda (a b)
+                                                (string-collate-lessp
+                                                 (downcase a) (downcase b))) files)
+                  :history org-fts/file-history
+                  :action 'find-file)))))
 
 (defun org-fts/ensure-binary ()
   "Make sure microfts is present"

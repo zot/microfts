@@ -18,3 +18,5 @@ Lets you pick one of the known org files
 [[./org-fts.gif]]
 * Installing
 download [[https://raw.githubusercontent.com/zot/microfts/main/elisp/org-fts.el][org-fts.el]] and use [[elisp:(call-interactively 'package-install-file)][M-x package-install-file]] to install it
+* Acknowledgements
+Thanks to John Kitchin for testing and many suggestions!

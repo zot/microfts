@@ -3,9 +3,9 @@
 ;; (c) 2020 by Bill Burdick, shared under MIT license
 
 ;; Author: Bill Burdick <bill.burdick@gmail.com>
-;; URL: https://github.com/zot/microfts/tree/main/elisp
+;; URL: https://github.com/zot/microfts/tree/main/elisp/org-fts.el
 ;; Version: 1.0.0
-;; Package-Requires: (cl-lib org ivy package executable)
+;; Package-Requires: (cl-lib org package executable)
 ;; Keywords: org convenience
 
 ;;; Commentary:
@@ -14,7 +14,6 @@
 
 (require 'cl-lib)
 (require 'org)
-(require 'ivy)
 (require 'package)
 (require 'executable)
 
@@ -51,8 +50,6 @@
   :type '(list string)
   :group 'org-fts)
 
-(defvar org-fts/hits nil)
-(defvar org-fts/args nil)
 (defvar org-fts/timer (run-with-idle-timer (* 60 5) t 'org-fts/idle-task))
 (defvar org-fts/actual-program nil)
 
@@ -111,82 +108,27 @@
                                 (start-process "org-fts" nil org-fts/actual-program
                                                "compact" org-fts/db)))))))
 
-(defun org-fts/microfts-search (termStr)
-  (let ((terms (condition-case nil (split-string-and-unquote termStr) ((debug error) nil))))
-    (when (and (org-fts/test terms "EMPTY TERMS") (org-fts/check-db))
-      (with-current-buffer (get-buffer-create "org-search")
-        (erase-buffer)
-        (let ((ret (apply #'call-process org-fts/actual-program nil "org-search" nil
-                          `("search" "-sexp" ,@org-fts/search-args ,org-fts/db ,@terms))))
-          (if (not (eql ret 0))
-              (progn
-                (message "Search returned error %s" ret)
-                nil)
-            (let ((lines (mapcar 'read (split-string (buffer-string) "\n" t))))
-              (setq org-fts/args terms)
-              (setq org-fts/hits lines)
-              (mapcar (lambda (line)
-                        (let* ((file (plist-get line :filename))
-                               (text (replace-regexp-in-string "\n" "\\\\n" (plist-get line :text))))
-                          (format "%s:%s: %s" (file-name-base file) (plist-get line :line)  text)))
-                      lines)
-              )))))))
-
-(defun org-fts/found (arg)
-  (ignore arg)
-  (let ((hit (elt org-fts/hits ivy--index)))
-    (find-file (plist-get hit :filename))
-    (if (equal major-mode 'org-mode) (org-show-all))
-    (goto-char (1+ (plist-get hit :char-offset)))))
-
-(defvar org-fts/history nil)
-(defvar org-fts/file-history nil)
-
-(defun org-fts/display (line)
-  (let* ((colon1 (cl-search ":" line))
-         (colon2 (cl-search ":" line :start2 (1+ colon1)))
-         (text (1+ colon2))
-         (lowLn (downcase line)))
-    (add-text-properties 0 colon1 '(face ivy-grep-info) line)
-    (add-text-properties (1+ colon1) colon2 '(face ivy-grep-line-number) line)
-    (cl-do ((a 0 (cl-incf a))) ((>= a (length org-fts/args)))
-      (let* ((arg (downcase (elt org-fts/args a))))
-        (cl-do ((i (cl-search arg lowLn :start2 text) (cl-search arg lowLn :start2 (+ i (length arg)))))
-            ((not i))
-          (put-text-property i (+ i (length arg)) 'face 'ivy-minibuffer-match-face-2 line))))
-    line))
-
-(ivy-configure 'fts
-  :display-transformer-fn 'org-fts/display)
-
-(defun org-fts/search ()
-  "Perform an fts search"
-  (interactive)
-  (when (org-fts/check-db)
-    (call-process org-fts/actual-program nil nil nil
-                  "update" org-fts/db)
-    (ivy-read "Org search: " 'org-fts/microfts-search
-              :history 'org-fts/history
-              :dynamic-collection t
-              :action 'org-fts/found
-              :caller 'fts)))
-
-(defun org-fts/find-org-file ()
-  "Find one of your org files"
-  (interactive)
-  (when (org-fts/check-db)
-    (with-current-buffer (get-buffer-create "org-fts")
+(defun org-fts/microfts-basic-search (terms)
+  (when (and (org-fts/test terms "EMPTY TERMS") (org-fts/check-db))
+    (with-current-buffer (get-buffer-create "org-search")
       (erase-buffer)
-      (call-process org-fts/actual-program nil "org-fts" nil
-                    "info" "-groups" org-fts/db)
-      (goto-char (point-min))
-      (perform-replace " *\\(org-mode\\)?\\( DELETED\\| NOT AVAILABLE\\| CHANGED\\)?$" "" nil t nil)
-      (let ((files (seq-filter (lambda (x) (> (length x) 0)) (split-string (buffer-string) "\n"))))
-        (ivy-read "Find org file: " (seq-sort (lambda (a b)
-                                                (string-collate-lessp
-                                                 (downcase a) (downcase b))) files)
-                  :history org-fts/file-history
-                  :action 'find-file)))))
+      (let ((ret (apply #'call-process org-fts/actual-program nil "org-search" nil
+                        `("search" "-sexp" ,@org-fts/search-args ,org-fts/db ,@terms))))
+        (if (not (eql ret 0))
+            (progn
+              (message "Search returned error %s" ret)
+              nil)
+          (mapcar 'read (split-string (buffer-string) "\n" t)))))))
+
+(defun org-fts/split-terms (termStr)
+  (condition-case nil (split-string-and-unquote termStr) ((debug error) nil)))
+
+(defun org-fts/microfts-search (termStr)
+  (mapcar (lambda (line)
+            (let ((file (plist-get line :filename))
+                  (text (replace-regexp-in-string "\n" "\\\\n" (plist-get line :text))))
+              (format "%s:%s: %s" file (plist-get line :line)  text)))
+          (org-fts/microfts-basic-search (org-fts/split-terms termStr))))
 
 (defun org-fts/ensure-binary ()
   "Make sure microfts is present"
@@ -221,6 +163,28 @@
                    (kill-buffer)
                    org-fts/baseprogram)
                (if compr (auto-compression-mode 1))))))))
+
+(defun org-fts/search (terms)
+  "Search org files for terms"
+  (interactive "sOrg search: ")
+  (minibuffer-with-setup-hook (lambda ())
+    (completing-read "Org file results: " (org-fts/microfts-search terms))))
+
+(defun org-fts/find-org-file ()
+  "Find one of your org files"
+  (interactive)
+  (when (org-fts/check-db)
+    (with-current-buffer (get-buffer-create "org-fts")
+      (erase-buffer)
+      (call-process org-fts/actual-program nil "org-fts" nil
+                    "info" "-groups" org-fts/db)
+      (goto-char (point-min))
+      (perform-replace " *\\(org-mode\\)?\\( DELETED\\| NOT AVAILABLE\\| CHANGED\\)?$" "" nil t nil)
+      (let ((files (seq-filter (lambda (x) (> (length x) 0)) (split-string (buffer-string) "\n"))))
+        (minibuffer-with-setup-hook (lambda ())
+          (completing-read "Org files: " (seq-sort (lambda (a b)
+                                                (string-collate-lessp
+                                                 (downcase a) (downcase b))) files)))))))
 
 (provide 'org-fts)
 

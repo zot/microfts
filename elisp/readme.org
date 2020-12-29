@@ -48,5 +48,12 @@ Lets you pick one of the known org files
 [[./org-fts.gif]]
 * Installing
 download [[https://raw.githubusercontent.com/zot/microfts/main/elisp/org-fts.el][org-fts.el]] and (optionally) [[https://raw.githubusercontent.com/zot/microfts/main/elisp/ivy-org-fts.el][ivy-org-fts.el]] use [[elisp:(call-interactively 'package-install-file)][M-x package-install-file]] to install.
+* Details
+** Automatic microfts download
+If you use org-fts without customizing the org-fts-program variable,
+it will automatically download microfts into your emacs configuration
+directory.
+** Database file
+org-fts uses a database file called org-fts.db in your emacs configuration directory. If it gets too big, you can use the microfts command to delete entries. You can also just delete the database file and org-fts will automatically create a new one the next time you visit or save an org file.
 * Acknowledgements
 Thanks to Professor John Kitchin for testing and many suggestions!

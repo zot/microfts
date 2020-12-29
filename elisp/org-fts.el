@@ -79,35 +79,20 @@
         (apply 'message format)
         nil)))
 
-(defun org-fts-save-hook ()
-  "A file was just saved, index/reindex it if it's an `org-mode' file."
+(defun org-fts-update-hook ()
+  "A file was just opened or saved, index/reindex it if it's an `org-mode' file."
   (when (and
          (buffer-file-name)
 	     (equal major-mode 'org-mode)
          (org-fts-check-db))
-    (message "UPDATING ORG-FTS: %s" (file-truename (buffer-file-name)))
     (start-process "org-fts" nil org-fts-actual-program
                    "input" "-org" org-fts-db (file-truename (buffer-file-name)))))
 
-(defun org-fts-open-hook ()
-  "A file was just saved, index/reindex it if it's an `org-mode' file."
-  (when (and
-         (buffer-file-name)
-	     (equal major-mode 'org-mode)
-         (org-fts-check-db))
-    (message "UPDATING ORG-FTS: %s" (file-truename (buffer-file-name)))
-    (let* ((file (file-truename (buffer-file-name)))
-          (ret (call-process org-fts-actual-program nil nil nil
-                             "empty" "-org" org-fts-db file)))
-      (org-fts-test (eql 0 ret) "adding %s to returned error %s" file ret)
-      (start-process "org-fts" nil org-fts-actual-program
-                     "update" org-fts-db))))
-
-(add-hook 'org-mode-hook 'org-fts-open-hook)
-(add-hook 'after-save-hook 'org-fts-save-hook)
+(add-hook 'org-mode-hook 'org-fts-update-hook)
+(add-hook 'after-save-hook 'org-fts-update-hook)
 
 (defun org-fts-idle-task ()
-  "After a certain amount of idle time, update the org-fts database."
+  "After a certain amount of idle time, update and compact the org-fts database."
   (when (org-fts-check-db)
     (let ((process (start-process "org-fts" nil org-fts-actual-program
                                   "update" org-fts-db)))

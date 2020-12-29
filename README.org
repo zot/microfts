@@ -3,8 +3,11 @@ A small full text indexing and search tool focusing on speed and
 space.  Initial tests seem to indicate that the database takes about
 twice as much space as the files it indexes.
 
-Microfts uses [[http://www.lmdb.tech/doc/index.html][LMDB]] for its database and [[https://github.com/AskAlexSharov/lmdb-go/lmdb][AskAlexSharov's fork]] of
-[[https://github.com/bmatsuo/lmdb-goto][bmatsuo's lmdb-go package]] to connect to it.
+Microfts implements a trigram GIN (generalized inverted index),
+relying on [[http://www.lmdb.tech/doc/index.html][LMDB]] for storage, an open source, embedded, NOSQL,
+key-value store library (so it's linked into microfts, not an external
+service). It uses [[https://github.com/AskAlexSharov/lmdb-go/lmdb][AskAlexSharov's fork]] of [[https://github.com/bmatsuo/lmdb-goto][bmatsuo's lmdb-go package]] to
+connect to it.
 
 * LICENSE
 

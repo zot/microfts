@@ -3,22 +3,43 @@
 * WARNING: This is pre-release code...
 I appreciate people trying this out and sending feedback to me via issues on [[https://github.com/zot/microfts][this repository]]!
 * Intro
-Org-fts automatically indexes changed org files as you visit them and save them. If you delete or rename an org file, org-fts will lose track of it until you visit it again.
+Org-fts is part of the [[https://github.com/zot/microfts][microfts]] project, which it uses for searching
+and indexing. Org-fts automatically indexes changed org files as you
+visit them and save them. If you delete or rename an org file, org-fts
+will lose track of it until you visit it again. It runs microfts
+whenever it indexes or searches (every time you hit a key during an
+ivy search), so it doesn't need to run a service.
 
-Searching is based on microfts, which is fairly fast, (returning results in less than 10ms for around 3M of files). Full text indexing takes space, so expect the index to take maybe 2-5 times the space of your files. Each keystroke in the screencast below does another full text search with microfts.
+Microfts is fairly fast, (returning results in less than 10ms for
+around 3M of files); each keystroke in the screencast below does a
+full text search with microfts.  Full text indexing does take space,
+however, so expect the index to take maybe 2-5 times the space of your
+files in the current implementation. If it gets too extravagant, I
+will see if there are more compact ways to store the index.
 
 * Usage
 There are two packages here that each provide two commands:
 ** org-fts provides =M-x org-fts-search= and =M-x org-fts-find-org-file=
 *** *M-x org-fts-search*
-Searches through all of the indexed org files and presents the results as a completion list. It returns org elements (table, paragraph, headline, etc.) that match all the terms you type. If you prefer to see every file that contains all of the terms you type (like you would see in a web search), you can customize org-fts-search-args and add -file to it. This will show only one line per file.
+Searches through all of the indexed org files and presents the results
+as a completion list. It returns org elements (table, paragraph,
+headline, etc.) that match all the terms you type. If you prefer to
+see every file that contains all of the terms you type (like you would
+see in a web search), you can customize org-fts-search-args and add
+-file to it. This will show only one line per file.
 
 You can quote terms like in a web search: =this "is a" test=
 *** *M-x org-fts-find-org-file*
 Lets you pick one of the known org files
 ** ivy-org-fts provides =M-x ivy-org-fts-search= and =M-x ivy-org-fts-find-org-file=
 *** *M-x ivy-org-fts-search*
-Starts an incremental search through all of the indexed org files and presents the results with ivy. It returns org elements (table, paragraph, headline, etc.) that match terms as you type them. If you prefer to see every file that contains all of the terms you type (like you would see in a web search), you can customize ivy-org-fts-search-args and add -file to it. This will show only one line per file.
+Starts an incremental search through all of the indexed org files and
+presents the results with ivy. It returns org elements (table,
+paragraph, headline, etc.) that match terms as you type them. If you
+prefer to see every file that contains all of the terms you type (like
+you would see in a web search), you can customize
+ivy-org-fts-search-args and add -file to it. This will show only one
+line per file.
 
 You can quote terms like in a web search: =this "is a" test=
 *** *M-x ivy-org-fts-find-org-file*

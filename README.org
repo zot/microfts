@@ -267,6 +267,6 @@ GIDS are compressed integers
 | oid count                         |
 | last changed timestamp            |
 | validity (valid = 0, deleted = 1) |
-| org -- whether -org was used      |
+| org: whether -org was used        |
 |-----------------------------------|
 *** Group Names: NAME->GID

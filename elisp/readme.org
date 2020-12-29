@@ -43,7 +43,7 @@ line per file.
 
 You can quote terms like in a web search: =this "is a" test=
 
-**** =C-f= toggles the -file argument for the search (changing it between searching for chunks and for files).
+**** =C-f= toggles the -file argument for the search (changing between searching for chunks and for files).
 *** *M-x ivy-org-fts-find-org-file*
 Lets you pick one of the known org files
 * Screencast

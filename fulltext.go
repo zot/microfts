@@ -141,6 +141,7 @@ func orgPart(pos int, str string) (int, int, int) {
 					break
 				}
 				listEnd += nextEnd + 1
+				if nextEnd+1 >= len(nextStr) {break}
 				nextStr = nextStr[nextEnd+1:]
 			}
 			lineEnd = listEnd

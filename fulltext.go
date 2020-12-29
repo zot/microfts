@@ -403,8 +403,8 @@ func printUsage() {
                    NOTE: THIS DOES NOT RECLAIM SPACE! USE COMPACT FOR THAT
    %[1]s compact DB
                    Reclaim space for deleted groups
-   %[1]s search [-n | -partial | -f | - limit N | -filter REGEXP | -u] DB TEXT
-505                   query with TEXT for objects
+   %[1]s search [-n | -partial | -f | - limit N | -filter REGEXP | -u] DB TEXT ...
+                   query with TEXT for objects
                    -f force search to skip changed and missing files instead of exiting
                    -filter makes search only return chunks that match the REGEXP
                    REGEXP syntax is here: https://golang.org/pkg/regexp/syntax/

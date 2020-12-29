@@ -103,7 +103,7 @@ Usage:
    microfts compact DB
                    Reclaim space for deleted groups
    microfts search [-n | -partial | -f | - limit N | -filter REGEXP | -u] DB TEXT
-505                   query with TEXT for objects
+                   query with TEXT for objects
                    -f force search to skip changed and missing files instead of exiting
                    -filter makes search only return chunks that match the REGEXP
                    REGEXP syntax is here: https://golang.org/pkg/regexp/syntax/
@@ -134,9 +134,29 @@ Usage:
         data to define for object
   -dx
         use hex instead of unicode for object data
+  -end-format string
+        search: Go format string for the end of a group
+        Arg to printf is the FILE
+        The default value is ""
+        if -sexp is provided and -end-format is not, the default is "\n"
+        Not used with search -fuzzy -sort
   -f    search: skip changed and missing files instead of exiting
+  -file
+        search: display files rather than chunks
   -filter string
         search: filter results that match REGEXP
+  -format string
+        search: Go format string for each result
+        Args to printf are FILE POSITION LINE OFFSET PERCENTAGE CHUNK
+        FILE (string) is the name of the file
+        POSITION (int) is the 1-based character position of the chunk in the file
+        LINE (int) is the 1-based line of the chunk in the file
+        OFFSET (int) is the 0-based offset of the first match in the chunk
+        PERCENTAGE (float) is the percentage of a fuzzy match
+        Note that you can place [ARGNUM] after the % to pick a particular arg to format
+        The default format is %s:%[2]s:%[5]s\n
+        -sexp sets format to (:filename "%s" :line %[3]d :offset %[4]d :text "%[6]s" :percent %[5]f)
+          Note that this will cause all matches to be on one (potentially large) line of output (default "%[6]s:%[2]d:%[5]s\n")
   -fuzzy float
         search: specify a percentage fuzzy match
   -gd
@@ -156,6 +176,8 @@ Usage:
         index org-mode chunks instead of lines
   -partial
         search: allow partial matches in search
+  -prof
+        profile cpu
   -s int
         gram size
   -sep
@@ -165,6 +187,15 @@ Usage:
         POS is the 1-based character position of the chunk in the file
         LINE is the 1-based line of the chunk in the file
         OFFSET is the 0-based offset of the first match in the chunk
+  -sort
+        search -fuzzy: sort all matches
+        This ignores start-format and end-format because it sorts all matches, regardless of
+        which file they come from.
+  -start-format string
+        search: Go format string for the start of a group
+        Arg to printf is the FILE
+        The default value is ""
+        Not used with search -fuzzy -sort
   -t    update: do a test run, printing what would have happened
   -u    search: update the database before searching
   -v    verbose

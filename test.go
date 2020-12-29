@@ -33,7 +33,7 @@ func testNums() {
 		if err != nil {
 			panic(err)
 		}
-		verify, gNext, err := getNum(buf)
+		verify, gNext, _ := getNum(buf)
 		if verify != nums[b] {
 			panic(fmt.Sprintf("ERROR: expected <%d> but got <%d>, buf = %v", nums[b], verify, buf))
 		} else if len(buf)-len(next) != b/2+1 {

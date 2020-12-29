@@ -247,172 +247,184 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 	defer cfg.env.Close()
 	cfg.view(func() {
 		if len(cfg.args) == 0 {
-			if cfg.groups {
-				cfg.iterate(cfg.groupNameDb, func(cur *lmdb.Cursor, k []byte, v []byte) {
-					printGroupInfo(cfg.getGroupWithGidBytes(v))
-				})
-				return
-			}
-			groups := int(cfg.stat(cfg.groupDb).Entries)
-			groupNames := cfg.stat(cfg.groupNameDb).Entries
-			chunks := float64(cfg.stat(cfg.chunkDb).Entries)
-			gramTot := cfg.stat(cfg.gramDb).Entries
-			gramTot--
-			staleGroups := map[string]string{}
-			staleGroupNames := []string{}
-			deletedGroups := map[uint64]struct{}{}
-			deletedChunks := 0
-			cfg.iterate(cfg.groupDb, func(cur *lmdb.Cursor, k, v []byte) {
-				gid, _ := getNumOrPanic(k)
-				group := decodeGroup(v)
-				if group.validity == deleted {
-					deletedGroups[gid] = member
-					return
-				}
-				stat, err := os.Stat(group.groupName)
-				if os.IsNotExist(err) {
-					staleGroups[group.groupName] = "File %s does not exist"
-				} else if err != nil {
-					staleGroups[group.groupName] = "Cannot open file %s"
-				} else if stat.ModTime().After(group.lastChanged) {
-					staleGroups[group.groupName] = "File %s has changes"
-				}
-			})
-			cfg.iterate(cfg.chunkDb, func(cur *lmdb.Cursor, k, v []byte) {
-				chunk := decodeChunk(v)
-				if _, deleted := deletedGroups[chunk.gid]; deleted {
-					deletedChunks++
-				}
-			})
-			groups -= len(deletedGroups)
-			groups -= len(staleGroups)
-			chunks -= float64(deletedChunks)
-			fmt.Printf("%-15s %d\n", "Group names:", groupNames)
-			fmt.Printf("%-15s %d\n", "Groups:", groups)
-			fmt.Printf("%-15s %d\n", "Deleted groups:", len(deletedGroups))
-			fmt.Printf("%-15s %d\n", "Bad groups:", len(staleGroups))
-			fmt.Printf("%-15s %d\n", "Chunks:", int64(chunks))
-			fmt.Printf("%-15s %d\n", "Deleted chunks:", deletedChunks)
-			fmt.Printf("%-15s %d\n", "Grams:", gramTot)
-			if len(staleGroups) > 0 {
-				for group := range staleGroups {
-					staleGroupNames = append(staleGroupNames, group)
-				}
-				sort.Strings(staleGroupNames)
-				for _, group := range staleGroupNames {
-					fmt.Fprintf(os.Stderr, staleGroups[group]+"\n", group)
-				}
-			}
-			if cfg.grams {
-				maxOids := 0
-				minOids := int(maxInt)
-				amounts := []float64{
-					0.99,
-					0.95,
-					0.90,
-					0.80,
-					0.75,
-					0.70,
-					0.30,
-					0.20,
-					0.10,
-					0.05,
-					0.01,
-					0.001,
-					0.0001,
-					0.00001,
-					0.000001,
-				}
-				coverage := map[float64]int{}
-				for _, amt := range amounts {
-					coverage[amt] = 0
-				}
-				totalBytes, chunkBytes, gramBytes := 0, 0, 0
-				cfg.iterate(cfg.chunkDb, func(cur *lmdb.Cursor, k, v []byte) {
-					totalBytes += len(k) + len(v)
-					chunkBytes += len(k) + len(v)
-				})
-				first := true
-				cfg.iterate(cfg.gramDb, func(cur *lmdb.Cursor, k, v []byte) {
-					if first {
-						first = false
-						return
-					}
-					oids := oidListFor(v)
-					totalBytes += len(k) + len(v)
-					gramBytes += len(k) + len(v)
-					oidTot := oids.totalOids()
-					if oidTot < minOids {
-						minOids = oidTot
-					}
-					if oidTot > maxOids {
-						maxOids = oidTot
-					}
-					for amt := range coverage {
-						if float64(oidTot)/float64(chunks) <= amt {
-							coverage[amt]++
-						}
-					}
-				})
-				if minOids == maxInt {
-					minOids = 0
-				}
-				fmt.Printf("total bytes: %d\n", totalBytes)
-				fmt.Printf("chunk bytes: %d\n", chunkBytes)
-				fmt.Printf("gram bytes: %d\n", gramBytes)
-				fmt.Printf("max oids: %d\n", maxOids)
-				fmt.Printf("min oids: %d\n", minOids)
-				for _, amt := range amounts {
-					fmt.Printf("%5d grams appear in %7.4f%% or fewer chunks\n", coverage[amt], 100*amt)
-				}
-			}
+			cfg.totalInfo()
 		} else if len(cfg.args) == 1 {
-			_, group := cfg.getGroup(cfg.groupName())
-			if group == nil {
-				exitError(fmt.Sprintf("NO GROUP %s\n", cfg.groupName()), ERROR_FILE_NOT_IN_DB)
-			}
-			if !printGroupInfo(group) {return}
-			if cfg.chunks {
-				if cfg.format == sexpFormat {
-					cfg.format = infoSexpFormat
-				}
-				contents, err := ioutil.ReadFile(group.groupName)
-				if os.IsNotExist(err) {
-					exitError(fmt.Sprintf("File does not exist: %s", group.groupName), ERROR_FILE_MISSING)
-				} else if err != nil {
-					exitError(fmt.Sprintf("Could not read file: %s", group.groupName), ERROR_FILE_UNREADABLE)
-				}
-				str := string(contents)
-				runeOffset := 0
-				printf(cfg.startFormat, group.groupName)
-				if group.org {
-					prev := 0
-					forParts(str, func(line, typ, start, end int) {
-						runeOffset += len([]rune(str[prev:start]))
-						fmt.Printf(cfg.format, runeOffset+1, line, 0, 0.0, escape(str[start:end]), group.groupName)
-						prev = start
-					})
-				} else {
-					input := bufio.NewReader(strings.NewReader(str))
-					pos := 0
-					for lineNo := 1; ; lineNo++ {
-						line, err := readLine(input)
-						if err == io.EOF {break}
-						check(err)
-						runes := []rune(line)
-						lineLen := len(line)
-						if lineLen > 0 && line[lineLen-1] == '\n' {
-							line = line[:lineLen-1]
-						}
-						fmt.Printf(cfg.format, runeOffset+1, line, 0, 0.0, escape(line), group.groupName)
-						pos += lineLen
-						runeOffset += len(runes)
-					}
-				}
-				printf(cfg.endFormat, group.groupName)
+			cfg.groupInfo()
+		}
+	})
+}
+
+func (cfg *lmdbConfigStruct) totalInfo() {
+	if cfg.groups {
+		cfg.iterate(cfg.groupNameDb, func(cur *lmdb.Cursor, k []byte, v []byte) {
+			printGroupInfo(cfg.getGroupWithGidBytes(v))
+		})
+		return
+	}
+	groups := int(cfg.stat(cfg.groupDb).Entries)
+	groupNames := cfg.stat(cfg.groupNameDb).Entries
+	chunks := float64(cfg.stat(cfg.chunkDb).Entries)
+	gramTot := cfg.stat(cfg.gramDb).Entries
+	gramTot--
+	staleGroups := map[string]string{}
+	staleGroupNames := []string{}
+	deletedGroups := map[uint64]struct{}{}
+	deletedChunks := 0
+	cfg.iterate(cfg.groupDb, func(cur *lmdb.Cursor, k, v []byte) {
+		gid, _ := getNumOrPanic(k)
+		group := decodeGroup(v)
+		if group.validity == deleted {
+			deletedGroups[gid] = member
+			return
+		}
+		stat, err := os.Stat(group.groupName)
+		if os.IsNotExist(err) {
+			staleGroups[group.groupName] = "File %s does not exist"
+		} else if err != nil {
+			staleGroups[group.groupName] = "Cannot open file %s"
+		} else if stat.ModTime().After(group.lastChanged) {
+			staleGroups[group.groupName] = "File %s has changes"
+		}
+	})
+	cfg.iterate(cfg.chunkDb, func(cur *lmdb.Cursor, k, v []byte) {
+		chunk := decodeChunk(v)
+		if _, deleted := deletedGroups[chunk.gid]; deleted {
+			deletedChunks++
+		}
+	})
+	groups -= len(deletedGroups)
+	groups -= len(staleGroups)
+	chunks -= float64(deletedChunks)
+	fmt.Printf("%-15s %d\n", "Group names:", groupNames)
+	fmt.Printf("%-15s %d\n", "Groups:", groups)
+	fmt.Printf("%-15s %d\n", "Deleted groups:", len(deletedGroups))
+	fmt.Printf("%-15s %d\n", "Bad groups:", len(staleGroups))
+	fmt.Printf("%-15s %d\n", "Chunks:", int64(chunks))
+	fmt.Printf("%-15s %d\n", "Deleted chunks:", deletedChunks)
+	fmt.Printf("%-15s %d\n", "Grams:", gramTot)
+	if len(staleGroups) > 0 {
+		for group := range staleGroups {
+			staleGroupNames = append(staleGroupNames, group)
+		}
+		sort.Strings(staleGroupNames)
+		for _, group := range staleGroupNames {
+			fmt.Fprintf(os.Stderr, staleGroups[group]+"\n", group)
+		}
+	}
+	if cfg.grams {
+		cfg.displayGrams(chunks)
+	}
+}
+
+func (cfg *lmdbConfigStruct) displayGrams(chunks float64) {
+	maxOids := 0
+	minOids := int(maxInt)
+	amounts := []float64{
+		0.99,
+		0.95,
+		0.90,
+		0.80,
+		0.75,
+		0.70,
+		0.30,
+		0.20,
+		0.10,
+		0.05,
+		0.01,
+		0.001,
+		0.0001,
+		0.00001,
+		0.000001,
+	}
+	coverage := map[float64]int{}
+	for _, amt := range amounts {
+		coverage[amt] = 0
+	}
+	totalBytes, chunkBytes, gramBytes := 0, 0, 0
+	cfg.iterate(cfg.chunkDb, func(cur *lmdb.Cursor, k, v []byte) {
+		totalBytes += len(k) + len(v)
+		chunkBytes += len(k) + len(v)
+	})
+	first := true
+	cfg.iterate(cfg.gramDb, func(cur *lmdb.Cursor, k, v []byte) {
+		if first {
+			first = false
+			return
+		}
+		oids := oidListFor(v)
+		totalBytes += len(k) + len(v)
+		gramBytes += len(k) + len(v)
+		oidTot := oids.totalOids()
+		if oidTot < minOids {
+			minOids = oidTot
+		}
+		if oidTot > maxOids {
+			maxOids = oidTot
+		}
+		for amt := range coverage {
+			if float64(oidTot)/float64(chunks) <= amt {
+				coverage[amt]++
 			}
 		}
 	})
+	if minOids == maxInt {
+		minOids = 0
+	}
+	fmt.Printf("total bytes: %d\n", totalBytes)
+	fmt.Printf("chunk bytes: %d\n", chunkBytes)
+	fmt.Printf("gram bytes: %d\n", gramBytes)
+	fmt.Printf("max oids: %d\n", maxOids)
+	fmt.Printf("min oids: %d\n", minOids)
+	for _, amt := range amounts {
+		fmt.Printf("%5d grams appear in %7.4f%% or fewer chunks\n", coverage[amt], 100*amt)
+	}
+}
+
+func (cfg *lmdbConfigStruct) groupInfo() {
+	_, group := cfg.getGroup(cfg.groupName())
+	if group == nil {
+		exitError(fmt.Sprintf("NO GROUP %s\n", cfg.groupName()), ERROR_FILE_NOT_IN_DB)
+	}
+	if !printGroupInfo(group) {return}
+	if cfg.chunks {
+		if cfg.format == sexpFormat {
+			cfg.format = infoSexpFormat
+		}
+		contents, err := ioutil.ReadFile(group.groupName)
+		if os.IsNotExist(err) {
+			exitError(fmt.Sprintf("File does not exist: %s", group.groupName), ERROR_FILE_MISSING)
+		} else if err != nil {
+			exitError(fmt.Sprintf("Could not read file: %s", group.groupName), ERROR_FILE_UNREADABLE)
+		}
+		str := string(contents)
+		runeOffset := 0
+		printf(cfg.startFormat, group.groupName)
+		if group.org {
+			prev := 0
+			forParts(str, func(line, typ, start, end int) {
+				runeOffset += len([]rune(str[prev:start]))
+				fmt.Printf(cfg.format, runeOffset+1, line, 0, 0.0, escape(str[start:end]), group.groupName)
+				prev = start
+			})
+		} else {
+			input := bufio.NewReader(strings.NewReader(str))
+			pos := 0
+			for lineNo := 1; ; lineNo++ {
+				line, err := readLine(input)
+				if err == io.EOF {break}
+				check(err)
+				runes := []rune(line)
+				lineLen := len(line)
+				if lineLen > 0 && line[lineLen-1] == '\n' {
+					line = line[:lineLen-1]
+				}
+				fmt.Printf(cfg.format, runeOffset+1, line, 0, 0.0, escape(line), group.groupName)
+				pos += lineLen
+				runeOffset += len(runes)
+			}
+		}
+		printf(cfg.endFormat, group.groupName)
+	}
 }
 
 func printGroupInfo(group *groupStruct) bool {
@@ -1242,35 +1254,46 @@ func (search *searchContext) displayResults() {
 			continue
 		}
 		chunks := search.getChunks(grpNm)
-		printf(cfg.startFormat, grpNm)
-	eachChunk:
-		for _, ch := range chunks {
-			if cfg.filter != "" && !search.reg.Match([]byte(ch.chunk)) {continue}
-			if cfg.fuzzy != 0 && cfg.sort {
-				sortedMatches = append(sortedMatches, ch)
-				continue
-			}
-			firstMatch := -1
-			if cfg.fuzzy != 0.0 {
-				firstMatch = 0
-			}
-			if !cfg.candidates && cfg.fuzzy == 0 { // check if chunk matches and skip if it doesn't
-				testChunk := ch.chunk
-				for argI, arg := range lowerArgs {
-					i := cfg.hasArg(testChunk, arg, upperArgs[argI])
-					if i == -1 {
-						continue eachChunk
-					}
-					if firstMatch == -1 {
-						firstMatch = i + len(ch.chunk) - len(testChunk)
-					}
+		if cfg.fuzzy == 0 || !cfg.sort {
+			printf(cfg.startFormat, grpNm)
+		}
+		sortedMatches = search.displayChunks(grpNm, chunks, lowerArgs, upperArgs, sortedMatches)
+		if cfg.fuzzy == 0 || !cfg.sort {
+			printf(cfg.endFormat, grpNm)
+		}
+	}
+	search.sortFuzzy(sortedMatches)
+}
+
+func (search *searchContext) displayChunks(grpNm string, chunks []*chunkInfo, lowerArgs, upperArgs []string, sortedMatches []*chunkInfo) []*chunkInfo {
+	cfg := search.cfg
+eachChunk:
+	for _, ch := range chunks {
+		if cfg.filter != "" && !search.reg.Match([]byte(ch.chunk)) {continue}
+		if cfg.fuzzy != 0 && cfg.sort {
+			sortedMatches = append(sortedMatches, ch)
+			continue
+		}
+		firstMatch := -1
+		if cfg.fuzzy != 0.0 {
+			firstMatch = 0
+		}
+		if !cfg.candidates && cfg.fuzzy == 0 { // check if chunk matches and skip if it doesn't
+			for argI, arg := range lowerArgs {
+				i := cfg.hasArg(ch.chunk, arg, upperArgs[argI])
+				if i == -1 {
+					continue eachChunk
+				}
+				if firstMatch == -1 {
+					firstMatch = i
 				}
 			}
+		}
+		if cfg.fuzzy == 0 || !cfg.sort {
 			search.displayChunk(grpNm, ch, firstMatch)
 		}
-		search.sortFuzzy(grpNm, sortedMatches)
-		printf(cfg.endFormat, grpNm)
 	}
+	return sortedMatches
 }
 
 func (cfg *lmdbConfigStruct) hasArg(str, lowerArg, upperArg string) int {
@@ -1364,7 +1387,7 @@ func (search *searchContext) displayChunk(grpNm string, ch *chunkInfo, firstMatc
 	}
 }
 
-func (search *searchContext) sortFuzzy(groupName string, sortedMatches []*chunkInfo) {
+func (search *searchContext) sortFuzzy(sortedMatches []*chunkInfo) {
 	cfg := search.cfg
 	if cfg.fuzzy != 0 && cfg.sort {
 		sort.Slice(sortedMatches, func(i, j int) bool {
@@ -1379,7 +1402,7 @@ func (search *searchContext) sortFuzzy(groupName string, sortedMatches []*chunkI
 			search.success = true
 		}
 		for _, ch := range sortedMatches {
-			fmt.Printf(cfg.format, ch.start, ch.line, 0, ch.match*100, escape(ch.chunk), groupName)
+			fmt.Printf(cfg.format, ch.start, ch.line, 0, ch.match*100, escape(ch.chunk), search.groupsByGid[ch.original.gid].groupName)
 		}
 	}
 }
@@ -1505,19 +1528,19 @@ func (cfg *lmdbConfigStruct) intersectGrams(inputGrams map[gram]struct{}) map[ui
 }
 
 func (cfg *lmdbConfigStruct) fuzzyMatch(inputGrams map[gram]struct{}, matches map[uint64]float64) map[uint64]struct{} {
-	occurances := map[uint64]int{}
+	occurences := map[uint64]int{}
 	for grm := range inputGrams {
 		oids := cfg.getGram(grm)
 		if oids == nil {
 			os.Exit(1)
 		}
 		for oid := range oids.allOids() {
-			occurances[oid]++
+			occurences[oid]++
 		}
 	}
 	results := map[uint64]struct{}{}
 	l := float64(len(inputGrams))
-	for oid, count := range occurances {
+	for oid, count := range occurences {
 		if float64(count)/l >= cfg.fuzzy {
 			results[oid] = member
 			matches[oid] = float64(count) / l
@@ -1623,7 +1646,7 @@ func decodeChunk(bytes []byte) *chunk {
 	result.gid, bytes = getNumOrPanic(bytes)
 	data, bytes := getCountedBytes(bytes)
 	result.data = data
-	g, bytes := getNumOrPanic(bytes)
+	g, _ := getNumOrPanic(bytes)
 	result.gramCount = uint16(g)
 	return result
 }

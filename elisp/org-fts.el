@@ -20,6 +20,8 @@
 ;; the space of your files. Each keystroke in the screencast below
 ;; does another full text search with microfts.
 
+;; Thanks to Professor John Kitchin for testing and contributions
+
 ;;; Code:
 
 (require 'cl-lib)
@@ -57,7 +59,12 @@
 
 (defcustom org-fts-search-args '("-partial")
   "Default arguments to search."
-  :type '(list string)
+  :type '(repeat string)
+  :group 'org-fts)
+
+(defcustom org-fts-input-args '("-org")
+  "Default arguments to input."
+  :type '(repeat string)
   :group 'org-fts)
 
 (defvar org-fts-timer (run-with-idle-timer (* 60 5) t 'org-fts-idle-task))
@@ -85,8 +92,8 @@
          (buffer-file-name)
 	     (equal major-mode 'org-mode)
          (org-fts-check-db))
-    (start-process "org-fts" nil org-fts-actual-program
-                   "input" "-org" org-fts-db (file-truename (buffer-file-name)))))
+    (apply #'start-process "org-fts" nil org-fts-actual-program
+           `("input" ,@org-fts-input-args ,org-fts-db ,(file-truename (buffer-file-name))))))
 
 (add-hook 'org-mode-hook 'org-fts-update-hook)
 (add-hook 'after-save-hook 'org-fts-update-hook)
@@ -105,7 +112,7 @@
 
 (defun org-fts-microfts-basic-search (terms)
   "Call microfts with TERMS and return results."
-  (when (and (org-fts-test terms "EMPTY TERMS") (org-fts-check-db))
+  (when (and terms (org-fts-check-db))
     (with-current-buffer (get-buffer-create "org-search")
       (erase-buffer)
       (let ((ret (apply #'call-process org-fts-actual-program nil "org-search" nil

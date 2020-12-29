@@ -12,6 +12,8 @@
 
 ;; Add ivy support for org-fts
 
+;; Thanks to Professor John Kitchin for testing and contributions
+
 ;;; Code:
 
 (require 'org-fts)
@@ -21,6 +23,19 @@
 (defvar ivy-org-fts-args nil)
 (defvar ivy-org-fts-history nil)
 (defvar ivy-org-fts-file-history nil)
+(defvar ivy-org-fts-file-switch nil)
+(defconst ivy-org-fts-keymap
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-f")
+      (lambda ()
+        (interactive)
+        (setq ivy-org-fts-file-switch (not (member "-file" org-fts-search-args)))
+        (if ivy-org-fts-file-switch
+            (add-to-list 'org-fts-search-args "-file")
+          (setq org-fts-search-args (remove "-file" org-fts-search-args)))
+        ;; this is hackery to get the candidates to refresh
+        (ivy-update-candidates (ivy-org-fts-microfs-search ivy-text))))
+    map))
 
 (defun ivy-org-fts-found (arg)
   "Visit result ARG from an ivy-org-fts search."
@@ -28,7 +43,9 @@
   (let ((hit (elt ivy-org-fts-hits ivy--index)))
     (find-file (plist-get hit :filename))
     (if (equal major-mode 'org-mode) (org-show-all))
-    (goto-char (1+ (plist-get hit :char-offset)))))
+    (goto-char (point-min))
+    (forward-line (- (plist-get hit :line) 1))
+    (forward-char (plist-get hit :offset))))
 
 (defun ivy-org-fts-display (line)
   "Prepare LINE for display in ivy."
@@ -48,7 +65,7 @@
 (ivy-configure 'fts
   :display-transformer-fn 'ivy-org-fts-display)
 
-(defun ivy-org-fts-microfs-search (term-str)
+(defun ivy-org-fts-microfts-search (term-str)
   "Call microfts to search for TERM-STR from ivy."
   (let* ((terms (org-fts-split-terms term-str))
          (lines (org-fts-microfts-basic-search terms)))
@@ -60,17 +77,21 @@
                 (format "%s:%s: %s" (file-name-base file) (plist-get line :line)  text)))
             lines)))
 
-(defun ivy-org-fts-search ()
-  "Perform an fts search."
-  (interactive)
-  (when (org-fts-check-db)
-    (call-process org-fts-actual-program nil nil nil
-                  "update" org-fts-db)
-    (ivy-read "Org search: " 'ivy-org-fts-microfs-search
-              :history 'ivy-org-fts-history
-              :dynamic-collection t
-              :action 'ivy-org-fts-found
-              :caller 'fts)))
+(defun ivy-org-fts-search (&optional file-match)
+  "Perform an fts search.
+if FILE-MATCH is non-nil search at the file level."
+  (interactive "P")
+  (let ((org-fts-search-args org-fts-search-args))
+    (when file-match (add-to-list 'org-fts-search-args "-file"))
+    (when (org-fts-check-db)
+      (call-process org-fts-actual-program nil nil nil
+                    "update" org-fts-db)
+      (ivy-read "Org search: " 'ivy-org-fts-microfs-search
+                :history 'ivy-org-fts-history
+                :dynamic-collection t
+                :action 'ivy-org-fts-found
+                :keymap ivy-org-fts-keymap
+                :caller 'fts))))
 
 (defun ivy-org-fts-find-org-file ()
   "Find one of your org files."

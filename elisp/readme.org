@@ -42,6 +42,8 @@ ivy-org-fts-search-args and add -file to it. This will show only one
 line per file.
 
 You can quote terms like in a web search: =this "is a" test=
+
+**** =C-f= toggles the -file argument for the search (changing it between searching for chunks and for files).
 *** *M-x ivy-org-fts-find-org-file*
 Lets you pick one of the known org files
 * Screencast

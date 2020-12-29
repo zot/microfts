@@ -1,4 +1,5 @@
 #+TITLE:ORG-FTS, a full-text search for org files with optional ivy support
+* *Org-fts indexes all the org files you open and/or save so you can find things later when you're not sure where they are*
 * WARNING: This is pre-release code...
 I appreciate people trying this out and sending feedback to me via issues on [[https://github.com/zot/microfts][this repository]]!
 * Intro

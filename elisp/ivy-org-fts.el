@@ -34,7 +34,7 @@
             (add-to-list 'org-fts-search-args "-file")
           (setq org-fts-search-args (remove "-file" org-fts-search-args)))
         ;; this is hackery to get the candidates to refresh
-        (ivy-update-candidates (ivy-org-fts-microfs-search ivy-text))))
+        (ivy-update-candidates (ivy-org-fts-microfts-search ivy-text))))
     map))
 
 (defun ivy-org-fts-found (arg)
@@ -86,7 +86,7 @@ if FILE-MATCH is non-nil search at the file level."
     (when (org-fts-check-db)
       (call-process org-fts-actual-program nil nil nil
                     "update" org-fts-db)
-      (ivy-read "Org search: " 'ivy-org-fts-microfs-search
+      (ivy-read "Org search: " 'ivy-org-fts-microfts-search
                 :history 'ivy-org-fts-history
                 :dynamic-collection t
                 :action 'ivy-org-fts-found

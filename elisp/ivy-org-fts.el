@@ -5,7 +5,7 @@
 ;; Author: Bill Burdick <bill.burdick@gmail.com>
 ;; URL: https://github.com/zot/microfts/tree/main/elisp/ivy-org-fts.el
 ;; Version: 1.0.0
-;; Package-Requires: ((org-fts "1.0.0") (ivy "0.13.1") (emacs "27.1"))
+;; Package-Requires: ((org-fts "1.0.0") (ivy "0.13.1") (emacs "26.0"))
 ;; Keywords: org convenience ivy
 
 ;;; Commentary:

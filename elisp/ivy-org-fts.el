@@ -74,7 +74,8 @@
     (mapcar (lambda (line)
               (let* ((file (plist-get line :filename))
                      (text (replace-regexp-in-string "\n" "\\\\n" (plist-get line :text))))
-                (format "%s:%s: %s" (file-name-base file) (plist-get line :line)  text)))
+                ;;(format "%s:%s: %s" (file-name-base file) (plist-get line :line)  text)))
+                (format "%s:%s: %s" (file-name-base file) (plist-get line :line) (org-fontify-like-in-org-mode text))
             lines)))
 
 (defun ivy-org-fts-search (&optional file-match)

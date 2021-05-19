@@ -62,7 +62,7 @@
   :type '(repeat string)
   :group 'org-fts)
 
-(defcustom org-fts-input-args '("-org")
+(defcustom org-fts-input-args '("")
   "Default arguments to input."
   :type '(repeat string)
   :group 'org-fts)

@@ -267,7 +267,7 @@ func (cfg *lmdbConfigStruct) debugInfo() {
 		oids := oidListFor(v)
 		freq := oids.totalOids()
 		g1 := gramString(gram((int(k[0])<< 8)|int(k[1])))
-		
+
 
 		for _, oidBytes := range oids {
 			for len(oidBytes) > 0 {
@@ -280,7 +280,7 @@ func (cfg *lmdbConfigStruct) debugInfo() {
 				_, data = getNumOrPanic(data)
 				strStart, data := getNumOrPanic(data)
 				strLen, _ := getNumOrPanic(data)
-				gid := chunk.gid 
+				gid := chunk.gid
 				group := cfg.getGroupWithGid(gid)
 				name := group.groupName
 				contents := readFile(name)
@@ -289,11 +289,46 @@ func (cfg *lmdbConfigStruct) debugInfo() {
 				end := start1 + int(strLen)
 				text := contents[start1:end]
 
-				// Print
-				fmt.Printf("DEBUG4: freq:%d token:%s oid:%n start:%d len:%d line:%d start:%d file:%s text:%s\n",
-					freq,g1,
-					oid,  strStart, strLen,int(lineNo), int(start), name, escape(text))
+				//
+				allgrams := grams(true,text)
+				itemsBefore := []string{}
+				itemsAfter := []string{}
+
+				// Initialize a variable to track the number of items before and after.
+				itemsCountBefore := 0
+				itemsCountAfter := 0
+				found := 0
 				
+				for grm := range allgrams {
+
+					cur := gramString(grm)
+					if (g1 == cur) {
+						found = 1
+					}else {
+						if (found == 1 ) {
+							itemsAfter = append(itemsAfter, cur)
+							itemsCountAfter++
+						} else	{
+							itemsBefore = append(itemsBefore, cur)
+							itemsCountBefore++
+						}
+					}
+					//oids := cfg.getGram(grm)
+					// Print
+
+				}
+
+				fmt.Printf("DEBUG4: freq:%d token:%s oid:%n start:%d len:%d line:%d start:%d file:%s text:%s gram:%s afer:%s\n",
+						freq,g1,
+							oid,
+							strStart,
+							strLen,
+							int(lineNo),
+							int(start),
+							name,
+							escape(text),
+							itemsBefore, itemsAfter)				
+
 				/// now we want to tokenize the results
 
 			}
@@ -403,9 +438,9 @@ func (cfg *lmdbConfigStruct) displayGrams(chunks float64) {
 		totalBytes += len(k) + len(v)
 		chunkBytes += len(k) + len(v)
 
-		chunk := decodeChunk(v)
+		//chunk := decodeChunk(v)
 		//key := decodeChunk(k)
-		fmt.Printf("DEBUG CHUNK STR:%s\tVALUE:%s\tKEY:%s gid:%d  count:%n char:%s\n",k,v, chunk.gid, chunk.gramCount, rune(chunk.data[0]))
+		//fmt.Printf("DEBUG CHUNK STR:%s\tVALUE:%s\tKEY:%s gid:%d  count:%n char:%s\n",k,v, chunk.gid, chunk.gramCount, rune(chunk.data[0]))
 	})
 	first := true
 	cfg.iterate(cfg.gramDb, func(cur *lmdb.Cursor, k, v []byte) {
@@ -414,11 +449,11 @@ func (cfg *lmdbConfigStruct) displayGrams(chunks float64) {
 			return
 		}
 		oids := oidListFor(v)
-		chunk := decodeChunk(v)
-		for oid := range oids {
-			fmt.Printf("DEBUG STR:%s\tVALUE:%s\tOID:%d\n",k,v,oid)
-			fmt.Printf("DEBUG2 STR:%s\tVALUE:%s\tOID:%d\n",k,chunk,oid)
-		}
+		//chunk := decodeChunk(v)
+		//for oid := range oids {
+			//fmt.Printf("DEBUG STR:%s\tVALUE:%s\tOID:%d\n",k,v,oid)
+			//fmt.Printf("DEBUG2 STR:%s\tVALUE:%s\tOID:%d\n",k,chunk,oid)
+		//}
 		totalBytes += len(k) + len(v)
 		gramBytes += len(k) + len(v)
 		oidTot := oids.totalOids()

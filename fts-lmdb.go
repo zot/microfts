@@ -9,11 +9,12 @@ import (
 	"io/ioutil"
 	"os"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
-
+	
 	"github.com/AskAlexSharov/lmdb-go/lmdb"
 )
 
@@ -246,6 +247,7 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 	cfg.open(false)
 	defer cfg.env.Close()
 	cfg.view(func() {
+		cfg.debugInfo()
 		if len(cfg.args) == 0 {
 			cfg.totalInfo()
 		} else if len(cfg.args) == 1 {
@@ -253,6 +255,75 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 		}
 	})
 }
+
+
+func (cfg *lmdbConfigStruct) debugInfo() {
+	first := true
+	cfg.iterate(cfg.gramDb, func(cur *lmdb.Cursor, k, v []byte) {
+		if first {
+			first = false
+			return
+		}
+		oids := oidListFor(v)
+		freq := oids.totalOids()
+		//grm1 := k[0]  >> 8
+		//grm2 := k[1] & 0xFF
+		
+		//fmt.Printf("%s%s",
+		//	strconv.FormatUint(uint64(grm>>8), 16),
+		//  strconv.FormatUint(uint64(grm&0xFF), 16))
+		g1 := gramString(gram((int(k[0])<< 8)|int(k[1])))
+		
+		fmt.Printf("%d\t%s\tDEBUG3\n", freq,g1)
+		// Skip system record
+		//if k == systemID {
+		//	return 
+		//}
+		
+		// Get gram value
+
+		
+		// Get OID list
+		//oids := oidListFor(v)
+		
+		// Get frequency
+		
+		
+		// Track co-occurrence with other grams
+		//co := make(map[gram]int)
+		
+		// Iterate over all OIDs
+		// for _, oidBytes := range oids {
+		//  	for len(oidBytes) > 0 {
+		//  		oid, rest := getNumOrPanic(oidBytes)
+		//  		oidBytes = rest
+				
+		// // 		// Load chunk 
+		//  		chunk := cfg.getChunk(cfg.oidKey(oid))
+				
+		// // 		// Increment co-occurrence for each gram
+		//  		stra := escape(string(chunk.data))
+		// // 		//for _, gram := range chunk.data {				
+		// // 		//co[stra]++
+		// // 		//for g, _ := range chunk.data {
+		// // 		//co[stra]++
+		//  		fmt.Printf("DEBUG:%s", stra) 
+		// // 		//}
+		//  	}
+		//  }
+		
+  // Print results
+		//fmt.Printf("%s: %d", gramString(grm), freq)
+		
+		//for g, c := range co {
+		//fmt.Printf(" %s:%d", gramString(g), c) 
+		//}
+
+		//fmt.Println()
+		
+	})
+}
+	
 
 func (cfg *lmdbConfigStruct) totalInfo() {
 	if cfg.groups {
@@ -344,6 +415,10 @@ func (cfg *lmdbConfigStruct) displayGrams(chunks float64) {
 	cfg.iterate(cfg.chunkDb, func(cur *lmdb.Cursor, k, v []byte) {
 		totalBytes += len(k) + len(v)
 		chunkBytes += len(k) + len(v)
+
+		chunk := decodeChunk(v)
+		//key := decodeChunk(k)
+		fmt.Printf("DEBUG CHUNK STR:%s\tVALUE:%s\tKEY:%s\n",k,v, chunk)
 	})
 	first := true
 	cfg.iterate(cfg.gramDb, func(cur *lmdb.Cursor, k, v []byte) {
@@ -352,6 +427,11 @@ func (cfg *lmdbConfigStruct) displayGrams(chunks float64) {
 			return
 		}
 		oids := oidListFor(v)
+		chunk := decodeChunk(v)		
+		for oid := range oids {
+			fmt.Printf("DEBUG STR:%s\tVALUE:%s\tOID:%d\n",k,v,oid)
+			fmt.Printf("DEBUG2 STR:%s\tVALUE:%s\tOID:%d\n",k,chunk,oid)
+		}		
 		totalBytes += len(k) + len(v)
 		gramBytes += len(k) + len(v)
 		oidTot := oids.totalOids()
@@ -494,7 +574,7 @@ func cmdChunk(cfg *lmdbConfigStruct) {
 			_, err := hex.Decode(grams, []byte(cfg.args[1]))
 			check(err)
 			for i := 0; i < len(grams); i += 2 {
-				cfg.addGramEntry(gram((int(grams[i])<<8)|int(grams[i+1])), oid, d)
+				cfg.addGramEntry(gram((int(grams[i])<< 8)|int(grams[i+1])), oid, d)
 			}
 		} else {
 			grams := strings.Split(cfg.args[1], cfg.delimiter)
@@ -1762,6 +1842,7 @@ func getCountedBytes(bytes []byte) (result []byte, rest []byte) {
 func getNumOrPanic(bytes []byte) (uint64, []byte) {
 	result, bytes, err := getNum(bytes)
 	if err != nil {
+		debug.PrintStack()
 		exitError("End of entry while reading number", ERROR)
 	}
 	return result, bytes

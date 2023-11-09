@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"os"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -246,6 +247,7 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 	cfg.open(false)
 	defer cfg.env.Close()
 	cfg.view(func() {
+		cfg.debugInfo()
 		if len(cfg.args) == 0 {
 			cfg.totalInfo()
 		} else if len(cfg.args) == 1 {
@@ -253,6 +255,97 @@ func cmdInfo(cfg *lmdbConfigStruct) {
 		}
 	})
 }
+
+
+func (cfg *lmdbConfigStruct) debugInfo() {
+	first := true
+	cfg.iterate(cfg.gramDb, func(cur *lmdb.Cursor, k, v []byte) {
+		if first {
+			first = false
+			return
+		}
+		oids := oidListFor(v)
+		freq := oids.totalOids()
+		g1 := gramString(gram((int(k[0])<< 8)|int(k[1])))
+
+
+		for _, oidBytes := range oids {
+			for len(oidBytes) > 0 {
+				oid, rest := getNumOrPanic(oidBytes)
+				oidBytes = rest
+				chunk := cfg.getChunk(cfg.oidKey(oid))
+				data := chunk.data
+				lineNo, data := getNumOrPanic(data)
+				start, data := getNumOrPanic(data)
+				_, data = getNumOrPanic(data)
+				strStart, data := getNumOrPanic(data)
+				strLen, _ := getNumOrPanic(data)
+				gid := chunk.gid
+				group := cfg.getGroupWithGid(gid)
+				name := group.groupName
+				contents := readFile(name)
+
+				start1 := int(strStart)
+				end := start1 + int(strLen)
+				text := contents[start1:end]
+
+				//
+				allgrams := grams(true,text)
+				itemsBefore := []string{}
+				itemsAfter := []string{}
+
+				// Initialize a variable to track the number of items before and after.
+				itemsCountBefore := 0
+				itemsCountAfter := 0
+				found := 0
+				
+				for grm := range allgrams {
+
+					cur := gramString(grm)
+					if (g1 == cur) {
+						found = 1
+					}else {
+						if (found == 1 ) {
+							itemsAfter = append(itemsAfter, cur)
+							itemsCountAfter++
+						} else	{
+							itemsBefore = append(itemsBefore, cur)
+							itemsCountBefore++
+						}
+					}
+					//oids := cfg.getGram(grm)
+					// Print
+
+				}
+
+				fmt.Printf("DEBUG4: freq:%d token:%s oid:%n start:%d len:%d line:%d start:%d file:%s text:%s gram:%s afer:%s\n",
+						freq,g1,
+							oid,
+							strStart,
+							strLen,
+							int(lineNo),
+							int(start),
+							name,
+							escape(text),
+							itemsBefore, itemsAfter)				
+
+				/// now we want to tokenize the results
+
+			}
+		}
+
+  // Print results
+		//fmt.Printf("%s: %d", gramString(grm), freq)
+
+		//for g, c := range co {
+		//fmt.Printf(" %s:%d", gramString(g), c)
+		//}
+
+		//fmt.Println()
+
+	})
+}
+
 
 func (cfg *lmdbConfigStruct) totalInfo() {
 	if cfg.groups {
@@ -344,6 +437,10 @@ func (cfg *lmdbConfigStruct) displayGrams(chunks float64) {
 	cfg.iterate(cfg.chunkDb, func(cur *lmdb.Cursor, k, v []byte) {
 		totalBytes += len(k) + len(v)
 		chunkBytes += len(k) + len(v)
+
+		//chunk := decodeChunk(v)
+		//key := decodeChunk(k)
+		//fmt.Printf("DEBUG CHUNK STR:%s\tVALUE:%s\tKEY:%s gid:%d  count:%n char:%s\n",k,v, chunk.gid, chunk.gramCount, rune(chunk.data[0]))
 	})
 	first := true
 	cfg.iterate(cfg.gramDb, func(cur *lmdb.Cursor, k, v []byte) {
@@ -352,6 +449,11 @@ func (cfg *lmdbConfigStruct) displayGrams(chunks float64) {
 			return
 		}
 		oids := oidListFor(v)
+		//chunk := decodeChunk(v)
+		//for oid := range oids {
+			//fmt.Printf("DEBUG STR:%s\tVALUE:%s\tOID:%d\n",k,v,oid)
+			//fmt.Printf("DEBUG2 STR:%s\tVALUE:%s\tOID:%d\n",k,chunk,oid)
+		//}
 		totalBytes += len(k) + len(v)
 		gramBytes += len(k) + len(v)
 		oidTot := oids.totalOids()
@@ -494,7 +596,7 @@ func cmdChunk(cfg *lmdbConfigStruct) {
 			_, err := hex.Decode(grams, []byte(cfg.args[1]))
 			check(err)
 			for i := 0; i < len(grams); i += 2 {
-				cfg.addGramEntry(gram((int(grams[i])<<8)|int(grams[i+1])), oid, d)
+				cfg.addGramEntry(gram((int(grams[i])<< 8)|int(grams[i+1])), oid, d)
 			}
 		} else {
 			grams := strings.Split(cfg.args[1], cfg.delimiter)
@@ -1762,6 +1864,7 @@ func getCountedBytes(bytes []byte) (result []byte, rest []byte) {
 func getNumOrPanic(bytes []byte) (uint64, []byte) {
 	result, bytes, err := getNum(bytes)
 	if err != nil {
+		debug.PrintStack()
 		exitError("End of entry while reading number", ERROR)
 	}
 	return result, bytes
